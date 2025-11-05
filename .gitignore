@@ -1,0 +1,6 @@
+data/*
+!data/raw/
+!data/processed/
+
+results/*
+!results/models/
