@@ -11,8 +11,12 @@ def find_bids_emg_files(bids_root, subject, session=None, task=None):
     subj_dir = os.path.join(bids_root, f"sub-{subject}")
     if session:
         subj_dir = os.path.join(subj_dir, f"ses-{session}")
-    emg_dir = os.path.join(subj_dir, "emg")
+    if task:
+        subj_dir = os.path.join(subj_dir, f"task-{task}")
 
+    emg_dir = os.path.join(subj_dir, "_emg")
+    print(emg_dir)
+    return 
     if not os.path.exists(emg_dir):
         raise FileNotFoundError(f"No EMG folder for subject {subject}, session {session}")
 
