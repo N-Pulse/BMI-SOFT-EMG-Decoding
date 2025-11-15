@@ -5,6 +5,8 @@ import pandas as pd
 import joblib
 
 from sklearn.model_selection import GridSearchCV, KFold, cross_val_score, train_test_split
+from libML import data_load_and_label_for_training
+from data_load_and_label_for_training import load_emg_data
 
 CONFIG = yaml.safe_load(open("config.yml"))
 
@@ -64,7 +66,7 @@ def main():
 
         # 1. Load data
         if os.path.exists(DATA_DIR):
-            raw_data = load_data(DATA_DIR)
+            emg_raw_data = load_emg_data(DATA_DIR)
         
         # 2. Map triggers into labels
         # TODO:
