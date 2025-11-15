@@ -74,14 +74,11 @@ def main():
         5) Save. to parquet ?
         '''
 
-        # 1. Load data
+        # 1. Load data and 2. Map triggers into labels
         if os.path.exists(DATA_DIR):
-            emg_raw_data = load_emg_data(DATA_DIR)
-        
-        # 2. Map triggers into labels
-        # TODO:
-        # X_raw with corresponding timestamps
-        # y_raw with corresponding timestamps
+            #emg_raw_data = load_emg_data(DATA_DIR)
+            # load_emg_data loads data for one specific run/task/session/subject combination, execute in a loop to get data from all subjects and sessions available (default: subject="P005", session="S002", task="Default", run="001_eeg_up")
+            X_raw, y_raw = load_emg_data(DATA_DIR)
 
         # 3. Preprocessing
         # TODO:
