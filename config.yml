@@ -2,6 +2,7 @@ paths:
   raw_data_dir: "./data/raw/"
   processed_data_path: "./data/processed/all_features.parquet"
   model_output_dir: "./results/models/"
+  best_params_output_dir: "./results/params/"
   fig_output_dir: "./results/figures/"
 
 processing:
@@ -24,6 +25,32 @@ modeling:
 
   # Model to use: "LDA" or "LinearSVC"
   model_type: "LDA"
+
+  hyperparams:
+    LDA:
+      solver: "lsqr"
+      shrinkage: "auto"
+    SVM:
+      dual: "auto"
+      max_iter: 10000
+      C: 1.0
+    GaussianNB: {}
+    DecisionTree:
+      max_depth: 10
+      criterion: "gini"
+
+  param_grids:
+    LDA:
+      solver: ["lsqr"]
+      shrinkage: ["auto"]
+    SVM:
+      dual: ["auto"]
+      max_iter: [10000]
+      C: [1.0]
+    GaussianNB: {}
+    DecisionTree:
+      max_depth: [10]
+      criterion: ["gini"]
   
   # For reproducible train/test splits
   random_state: 42
