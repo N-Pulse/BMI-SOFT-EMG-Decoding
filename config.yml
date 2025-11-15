@@ -1,0 +1,35 @@
+paths:
+  raw_data_dir: "./data/raw/"
+  processed_data_path: "./data/processed/all_features.parquet"
+  model_output_dir: "./results/models/"
+  fig_output_dir: "./results/figures/"
+
+processing:
+  sample_rate_hz: 2000
+  window_size_ms: 200
+  window_step_ms: 50
+
+modeling:
+  # List of all Degrees of Freedom (DoF) to train models for.
+  # The label processing function must produce columns matching these names.
+  dof_list:
+    - "wrist_flex_ext"
+    - "wrist_pro_sup"
+    - "thumb_flex_ext"
+    - "thumb_abd_add"
+    - "index_flex_ext"
+    - "middle_flex_ext"
+    - "ring_flex_ext"
+    - "pinky_flex_ext"
+
+  # Model to use: "LDA" or "LinearSVC"
+  model_type: "LDA"
+  
+  # For reproducible train/test splits
+  random_state: 42
+  
+  # Percentage of data to hold out for the test set
+  test_size: 0.2
+
+  # Number of cross validation
+  cv: 5
