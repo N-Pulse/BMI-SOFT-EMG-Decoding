@@ -238,3 +238,57 @@ def map_protocol_to_label(trigger_labels):
                 new_label += 2 * 10e6
         trigger_labels[i] = new_label
     return trigger_labels
+
+def convert_labels_to_dof_dict(y):
+    """
+    Convert the final label array y to a dictionary of 8 degrees of freedom.
+    
+    Assumes y contains the 8-digit encoded labels from your original mapping.
+    
+    Returns: dict with keys 'dof_1' to 'dof_8' representing each degree of freedom
+    """
+    # Initialize arrays for each degree of freedom
+    dof_1 = np.full(len(y), -1, dtype=int)  # Thumb flexion
+    dof_2 = np.full(len(y), -1, dtype=int)  # Index flexion  
+    dof_3 = np.full(len(y), -1, dtype=int)  # Middle flexion
+    dof_4 = np.full(len(y), -1, dtype=int)  # Ring flexion
+    dof_5 = np.full(len(y), -1, dtype=int)  # Little flexion
+    dof_6 = np.full(len(y), -1, dtype=int)  # Supination
+    dof_7 = np.full(len(y), -1, dtype=int)  # Wrist angle
+    dof_8 = np.full(len(y), -1, dtype=int)  # Thumb abduction
+    
+    for i, label in enumerate(y):
+        if label == -1:
+            # Skip invalid labels
+            continue
+            
+        # Decode the 8-digit number back to individual DoFs
+        # Assuming the encoding is: dof_1 * 10^0 + dof_2 * 10^1 + ... + dof_8 * 10^7
+        temp_label = label
+        dof_1[i] = temp_label % 10
+        temp_label //= 10
+        dof_2[i] = temp_label % 10
+        temp_label //= 10
+        dof_3[i] = temp_label % 10
+        temp_label //= 10
+        dof_4[i] = temp_label % 10
+        temp_label //= 10
+        dof_5[i] = temp_label % 10
+        temp_label //= 10
+        dof_6[i] = temp_label % 10
+        temp_label //= 10
+        dof_7[i] = temp_label % 10
+        temp_label //= 10
+        dof_8[i] = temp_label % 10
+    
+    return {
+        'dof_1': dof_1,  # Thumb flexion (0: flexed, 1: rest, 2: extended)
+        'dof_2': dof_2,  # Index flexion (0: flexed, 1: rest, 2: extended)
+        'dof_3': dof_3,  # Middle flexion (0: flexed, 1: rest, 2: extended)
+        'dof_4': dof_4,  # Ring flexion (0: flexed, 1: rest, 2: extended)
+        'dof_5': dof_5,  # Little flexion (0: flexed, 1: rest, 2: extended)
+        'dof_6': dof_6,  # Supination (0: up, 1: side, 2: down)
+        'dof_7': dof_7,  # Wrist angle (0: up, 1: straight, 2: down)
+        'dof_8': dof_8,  # Thumb abduction (0: dorsal, 1: rest, 2: palmar)
+        'original_labels': y  # Keep the original encoded labels
+    }

@@ -1,5 +1,5 @@
 from data_loading_xdf import load_emg_bids, find_bids_emg_files, get_emg_channels
-from trigger_to_label import map_triggers_to_labels
+from trigger_to_label import map_triggers_to_labels, convert_labels_to_dof_dict
 import argparse
 import sys
 import os
@@ -53,8 +53,10 @@ def load_emg_data(repo_root, subject="P005", session="S002", task="Default", run
         timestamps = np.array(labeled_data['time_stamps'])
 
         print(f"Successfully loaded.")
+
+        y_raw_dict = convert_labels_to_dof_dict(y_raw)
     
-        return X_raw, y_raw, timestamps
+        return X_raw, y_raw_dict, timestamps
     
     except Exception as e:
         print(f"Error loading EMG data: {e}")

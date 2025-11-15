@@ -62,9 +62,9 @@ def main():
         1) loop for subjects and for sessions
         2) load emg + triggers
         3) empty all_sessions_data. For each emg file : 
-        3.1) resample X_raw (emg timeseries) using the emg timestamps -> X_resampled
-        3.2) trigger vector y_triggers: same length as X_resampled, iterate throught timestamps and take the last triggers
-        3.3) map trigger to labels : y (in a dict for 8 DoFs)
+        3.1) resample X_raw (emg timeseries) using the emg timestamps -> X_resampled  
+        3.2) trigger vector y_triggers: same length as X_resampled, iterate throught timestamps and take the last triggers 
+        3.3) map trigger to labels : y (in a dict for 8 DoFs) 
         3.4) Filter : bandpass + Notch
         3.5) Window + feature extraction -> X_features (2D array), y_labels (dict of 1D arrays)
         3.6) all to DataFrames : features_df = pd.DataFrame(X_features, columns=...), labels_df = pd.DataFrame(y_labels), session_df = pd.concat([features_df, labels_df], axis=1)
@@ -78,7 +78,7 @@ def main():
         if os.path.exists(DATA_DIR):
             #emg_raw_data = load_emg_data(DATA_DIR)
             # load_emg_data loads data for one specific run/task/session/subject combination, execute in a loop to get data from all subjects and sessions available (default: subject="P005", session="S002", task="Default", run="001_eeg_up")
-            X_raw, y_raw = load_emg_data(DATA_DIR)
+            X_raw, y_raw_dict = load_emg_data(DATA_DIR)
 
         # 3. Preprocessing
         # TODO:
