@@ -5,9 +5,8 @@ import pandas as pd
 import joblib
 
 from sklearn.model_selection import GridSearchCV, KFold, cross_val_score, train_test_split
-from libML import data_load_and_label_for_training
-from data_load_and_label_for_training import load_emg_data
 
+from libML.data_load_and_label_for_training import load_emg_data
 from libML.models import choose_model
 from libML.evaluation import compute_scores, plot_cv_scores
 from libML.export import save_best_params, save_model
@@ -63,11 +62,11 @@ def main():
         1) loop for subjects and for sessions
         2) load emg + triggers
         3) empty all_sessions_data. For each emg file : 
-        3.1) resample X_raw (emg timeseries) using the emg timestamps -> X_resampled  
+        (3.1) resample X_raw (emg timeseries) using the emg timestamps -> X_resampled)
         3.2) trigger vector y_triggers: same length as X_resampled, iterate throught timestamps and take the last triggers 
-        3.3) map trigger to labels : y (in a dict for 8 DoFs) 
-        3.4) Filter : bandpass + Notch
-        3.5) Window + feature extraction -> X_features (2D array), y_labels (dict of 1D arrays)
+        3.3) map trigger to labels : y (in a dict for 8 DoFs) (+ add previous state of the arm pronation/neutral/supination)
+        3.4) Window (only take windows with same labels) + filter (causal filters : bandpass + Notch) + feature extraction -> X_features (2D array), y_labels (dict of 1D arrays)
+        3.5) Scale features, save scalers
         3.6) all to DataFrames : features_df = pd.DataFrame(X_features, columns=...), labels_df = pd.DataFrame(y_labels), session_df = pd.concat([features_df, labels_df], axis=1)
         3.7) session_df['subject_id'] = subject_id, session_df['session_id'] = session_id
         3.8) all_sessions_data.append(session_df)
@@ -79,7 +78,10 @@ def main():
         if os.path.exists(DATA_DIR):
             #emg_raw_data = load_emg_data(DATA_DIR)
             # load_emg_data loads data for one specific run/task/session/subject combination, execute in a loop to get data from all subjects and sessions available (default: subject="P005", session="S002", task="Default", run="001_eeg_up")
-            X_raw, y_raw_dict = load_emg_data(DATA_DIR)
+            data_list = load_emg_data(DATA_DIR, subject="P005") # list of dict
+            # 3.3) done
+
+            # ...
 
         # 3. Preprocessing
         # TODO:
@@ -99,8 +101,8 @@ def main():
     for dof in DOF_LIST:
 
         # 5.1. Select corresponding labels
-        y_dof = y[dof]
-        X_dof = X
+        y_dof = y[dof] # labels corresponding to DoF
+        X_dof = X # features
 
         # 5.2. Model
         model = choose_model(MODEL_TYPE, ALL_HYPERPARAMS, RANDOM_STATE)
@@ -134,6 +136,7 @@ def main():
                 save_best_params(best_params, dof, BEST_PARAMS_OUTPUT_DIR)
         else:
             # 5.4. Train model with best params
+            final_model = model
             final_model.fit(X_train, y_train)
 
         # 5.5. Evaluate
