@@ -57,6 +57,7 @@ def main():
 
     else:
         '''
+        TODO
         1) loop for subjects and for sessions
         2) load emg + triggers
         3) empty all_sessions_data. For each emg file : 
@@ -69,7 +70,7 @@ def main():
         3.7) session_df['subject_id'] = subject_id, session_df['session_id'] = session_id
         3.8) all_sessions_data.append(session_df)
         4) final_processed_df = pd.concat(all_sessions_data, ignore_index=True)
-        5) Save. to parquet ?
+        5) Save features to avoid to compute it each time. to parquet ?
         '''
 
         # 1. Load data
