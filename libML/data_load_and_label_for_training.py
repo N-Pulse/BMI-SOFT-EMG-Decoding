@@ -1,8 +1,9 @@
 from data_loading_xdf import load_emg_bids, find_bids_emg_files, get_emg_channels
-from trigger_to_label import map_triggers_to_labels
+from trigger_to_label import map_triggers_to_labels, convert_labels_to_dof_dict
 import argparse
 import sys
 import os
+import numpy as np
 
 def get_emg_labels_from_path(repo_root, subject="P005", session="S002", task="Default", run="001_eeg_up"):
     """
@@ -45,73 +46,18 @@ def load_emg_data(repo_root, subject="P005", session="S002", task="Default", run
         trigger_stream = streams[0]
         
         labeled_data = map_triggers_to_labels(emg_channels, trigger_stream)
-        
-        print(f"✅ Successfully loaded:")
 
-        return labeled_data
+        X_raw = np.array(labeled_data['time_series'])  # Convert to numpy array
+        y_raw = np.array(labeled_data['labels'])       # Convert to numpy array
+        
+        timestamps = np.array(labeled_data['time_stamps'])
+
+        print(f"Successfully loaded.")
+
+        y_raw_dict = convert_labels_to_dof_dict(y_raw)
+    
+        return X_raw, y_raw_dict, timestamps
     
     except Exception as e:
-        print(f"❌ Error loading EMG data: {e}")
+        print(f"Error loading EMG data: {e}")
         return None
-
-def main():
-    """Main function with command line argument parsing"""
-    parser = argparse.ArgumentParser(description='Load EMG data from BIDS format')
-    
-    # Required argument
-    parser.add_argument('--root', required=True, help='Root path to BIDS dataset')
-    
-    # Optional arguments with defaults
-    parser.add_argument('--subject', default='P005', help='Subject ID (default: P005)')
-    parser.add_argument('--session', default='S002', help='Session ID (default: S002)')
-    parser.add_argument('--task', default='Default', help='Task name (default: Default)')
-    parser.add_argument('--run', default='001_eeg_up', help='Run identifier (default: 001_eeg_up)')
-    
-    # Additional options
-    parser.add_argument('--list-subjects', action='store_true', help='List available subjects')
-    parser.add_argument('--output', help='Output file to save loaded data')
-    
-    args = parser.parse_args()
-    
-    # List subjects if requested
-    if args.list_subjects:
-        try:
-            subjects = find_bids_emg_files(args.root)
-            print("Available subjects:")
-            for sub in subjects:
-                print(f"  - {sub}")
-            return
-        except Exception as e:
-            print(f"Error listing subjects: {e}")
-            return
-    
-    # Load EMG data
-    labeled_emg = load_emg_data(
-        repo_root=args.root,
-        subject=args.subject,
-        session=args.session,
-        task=args.task,
-        run=args.run
-    )
-    
-    if labeled_emg is not None:
-        print(f"\n🎉 Data loaded successfully!")
-        
-        # Save to file if output path provided
-        if args.output:
-            try:
-                import pickle
-                with open(args.output, 'wb') as f:
-                    pickle.dump({'labeled_emg': labeled_emg}, f)
-                print(f"💾 Data saved to: {args.output}")
-            except Exception as e:
-                print(f"Warning: Could not save data: {e}")
-        
-        return labeled_emg
-    else:
-        print("💥 Failed to load data")
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
