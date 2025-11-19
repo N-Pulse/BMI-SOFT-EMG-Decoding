@@ -3,6 +3,8 @@ Module for nPulse EMG signal processing.
 
 This module maps the trigger signals to corresponding action labels that can be used
 as training targets for machine learning models.
+
+The decoding of the trigger labels relies on the trigger system protocol as of the 19.11.2025.
 """
 
 import numpy as np
@@ -125,16 +127,18 @@ def map_protocol_to_label(trigger_labels):
     Dummy version : Not taking into account initial hand state, only final state of the action
 
     For each protocol movement, label 8 degrees of freedom :
-        1. Thumb flexed/rest/extended  -->  0/1/2
-        2. Index flexed/rest/extended  -->  0/1/2
-        3. Middle flexed/rest/extended -->  0/1/2
-        4. Ring flexed/rest/extended   -->  0/1/2
-        5. Little flexed/rest/extended -->  0/1/2
-        6. Supination  Palm facing: Up/Side/Down  -->  0/1/2
-        7. Wrist angle Palm facing down then: Up(-90)/Straight(0)/Down(90)  -->  0/1/2
-        8. Thumb Abduction --> extended dorsal / rest / extended palmar --> 0/1/2
+        1.  Thumb flexed/rest/extended  -->  0/1/2
+        2.  Index flexed/rest/extended  -->  0/1/2
+        3.  Middle flexed/rest/extended -->  0/1/2
+        4.  Ring flexed/rest/extended   -->  0/1/2
+        5.  Little flexed/rest/extended -->  0/1/2
+        6.  Supination  Palm facing: Up/Side/Down  -->  0/1/2
+        7.  Wrist angle Palm facing down then: Up(-90)/Straight(0)/Down(90)  -->  0/1/2
+        8.  Thumb Abduction --> extended dorsal / rest / extended palmar --> 0/1/2
+        9.  Strength --> not specified / low / medium / high --> 0/1/2/3
+        10. Speed --> not specified / low / medium / high --> 0/1/2/3
 
-    Label is encoded in a 8-digit value, its order in the list corresponding to its digit + 1 (1. --> 10e0, 2 --> 10e1, ...)
+    Label is encoded in a 10-digit value (int)
     Label = -1 is for non interesting data
 
     """
@@ -236,10 +240,32 @@ def map_protocol_to_label(trigger_labels):
                 new_label += 1 * 10e6
             if movement_label in [3, 4, 5, 6, 10, 15, 16, 17, 22]: # palmar 
                 new_label += 2 * 10e6
+            
+            # Strength --> not specified, low, medium, high --> 0/1/2/3
+            if movement_label in [1,2,3,4,7,8,9,10,15,16,17,18,19,20,21,22,23,24,25,26,27]: # not specified
+                new_label += 0 * 10e7
+            if movement_label in []: # low
+                new_label += 1 * 10e7
+            if movement_label in [5,12,13]: # normal 
+                new_label += 2 * 10e7
+            if movement_label in [6,11,14]: # high 
+                new_label += 3 * 10e7
+            
+            # Speed --> not specified, low, medium, high --> 0/1/2/3
+            if movement_label in [5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27]: # not specified
+                new_label += 0 * 10e8
+            if movement_label in [1,3]: # low
+                new_label += 1 * 10e8
+            if movement_label in []: # normal 
+                new_label += 2 * 10e8
+            if movement_label in [2,4]: # high 
+                new_label += 3 * 10e8
+
+
         trigger_labels[i] = new_label
     return trigger_labels
 
-def convert_labels_to_dof_dict(y):
+def convert_labels_to_dof_dict(y, strength_and_speed: bool):
     """
     Convert the final label array y to a dictionary of 8 degrees of freedom.
     
@@ -256,6 +282,8 @@ def convert_labels_to_dof_dict(y):
     dof_6 = np.full(len(y), -1, dtype=int)  # Supination
     dof_7 = np.full(len(y), -1, dtype=int)  # Wrist angle
     dof_8 = np.full(len(y), -1, dtype=int)  # Thumb abduction
+    dof_9 = np.full(len(y), -1, dtype=int)  # Strength
+    dof_10 = np.full(len(y), -1, dtype=int)  # Speed
     
     for i, label in enumerate(y):
         if label == -1:
@@ -280,15 +308,34 @@ def convert_labels_to_dof_dict(y):
         dof_7[i] = temp_label % 10
         temp_label //= 10
         dof_8[i] = temp_label % 10
-    
-    return {
-        'dof_1': dof_1,  # Thumb flexion (0: flexed, 1: rest, 2: extended)
-        'dof_2': dof_2,  # Index flexion (0: flexed, 1: rest, 2: extended)
-        'dof_3': dof_3,  # Middle flexion (0: flexed, 1: rest, 2: extended)
-        'dof_4': dof_4,  # Ring flexion (0: flexed, 1: rest, 2: extended)
-        'dof_5': dof_5,  # Little flexion (0: flexed, 1: rest, 2: extended)
-        'dof_6': dof_6,  # Supination (0: up, 1: side, 2: down)
-        'dof_7': dof_7,  # Wrist angle (0: up, 1: straight, 2: down)
-        'dof_8': dof_8,  # Thumb abduction (0: dorsal, 1: rest, 2: palmar)
-        'original_labels': y  # Keep the original encoded labels
-    }
+        if strength_and_speed:
+            temp_label //= 10
+            dof_9[i] = temp_label % 10
+            temp_label //= 10
+            dof_10[i] = temp_label % 10
+    if strength_and_speed:
+        return {
+            'dof_1': dof_1,  # Thumb flexion (0: flexed, 1: rest, 2: extended)
+            'dof_2': dof_2,  # Index flexion (0: flexed, 1: rest, 2: extended)
+            'dof_3': dof_3,  # Middle flexion (0: flexed, 1: rest, 2: extended)
+            'dof_4': dof_4,  # Ring flexion (0: flexed, 1: rest, 2: extended)
+            'dof_5': dof_5,  # Little flexion (0: flexed, 1: rest, 2: extended)
+            'dof_6': dof_6,  # Supination (0: up, 1: side, 2: down)
+            'dof_7': dof_7,  # Wrist angle (0: up, 1: straight, 2: down)
+            'dof_8': dof_8,  # Thumb abduction (0: dorsal, 1: rest, 2: palmar)
+            'dof_9': dof_9,  # Strength (0: NaN, 0: Low, 1: Medium, 2: High)
+            'dof_10': dof_10,  # Speed (0: NaN, 0: Low, 1: Medium, 2: High)
+            'original_labels': y  # Keep the original encoded labels
+        }
+    else:
+        return {
+            'dof_1': dof_1,  # Thumb flexion (0: flexed, 1: rest, 2: extended)
+            'dof_2': dof_2,  # Index flexion (0: flexed, 1: rest, 2: extended)
+            'dof_3': dof_3,  # Middle flexion (0: flexed, 1: rest, 2: extended)
+            'dof_4': dof_4,  # Ring flexion (0: flexed, 1: rest, 2: extended)
+            'dof_5': dof_5,  # Little flexion (0: flexed, 1: rest, 2: extended)
+            'dof_6': dof_6,  # Supination (0: up, 1: side, 2: down)
+            'dof_7': dof_7,  # Wrist angle (0: up, 1: straight, 2: down)
+            'dof_8': dof_8,  # Thumb abduction (0: dorsal, 1: rest, 2: palmar)
+            'original_labels': y  # Keep the original encoded labels
+        }

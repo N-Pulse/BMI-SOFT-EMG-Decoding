@@ -21,12 +21,13 @@ def get_emg_labels_from_path(repo_root, subject="P005", session="S002", task="De
     return emg_labeled
 
 
-def load_single_emg_file(repo_root, subject="P005", session="S002", task="Default", run="001_eeg_up"):
+def load_single_emg_file(repo_root, strength_and_speed=False, subject="P005", session="S002", task="Default", run="001_eeg_up"):
     """
     Load EMG data and labels from a BIDS-compliant directory.
     
     Args:
         repo_root (str): Root path to BIDS dataset
+        strength_and_speed (bool): Include DoF describing strength and speed of the movement
         subject (str): Subject ID (e.g., "P005")
         session (str): Session ID (e.g., "S002") 
         task (str): Task name (e.g., "Default")
@@ -55,7 +56,7 @@ def load_single_emg_file(repo_root, subject="P005", session="S002", task="Defaul
 
         print(f"Successfully loaded.")
 
-        y_raw_dict = convert_labels_to_dof_dict(y_raw)
+        y_raw_dict = convert_labels_to_dof_dict(y_raw, strength_and_speed)
 
         data_dict = {
             'X': X_raw,
@@ -74,13 +75,14 @@ def load_single_emg_file(repo_root, subject="P005", session="S002", task="Defaul
         return None
     
 
-def load_emg_data(repo_root, **filters):
+def load_emg_data(repo_root, strength_and_speed=False, **filters):
     """
     Loads all EMG data files from a BIDS-compliant dataset that match
     the provided filters.
 
     Args:
         repo_root (str): Root path to BIDS dataset.
+        strength_and_speed (bool): Include DoF describing strength and speed of the movement
         **filters: Keyword arguments to filter by.
             Keys must be BIDS components: 'subject', 'session', 'task', 'run'.
             Values can be a single string or a list of strings.
@@ -166,7 +168,7 @@ def load_emg_data(repo_root, **filters):
             # We only pass components that were *actually found* in the filename.
             # If a component is None, it's not passed, so the
             # load_single_emg_file function will use its *own* default.
-            load_args = {'repo_root': repo_root}
+            load_args = {'repo_root': repo_root, 'strength_and_speed': strength_and_speed}
             for key, val in components.items():
                 if val is not None:
                     load_args[key] = val
