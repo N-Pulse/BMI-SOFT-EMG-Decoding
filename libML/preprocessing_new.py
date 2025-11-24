@@ -26,7 +26,7 @@ def segment_aux_windows(data, timestamps, channel_labels, window_ms=200, step_ms
     
     return pd.DataFrame(windowed_data)
 
-def segment_aux_windows_new(data, window_ms=200, step_ms=100, sampling_rate=1000):
+def segment_aux_windows_new(data, labels, window_ms=200, step_ms=100, sampling_rate=1000):
     """
     Create windowed DataFrame directly from EMG data array.
     
@@ -44,16 +44,33 @@ def segment_aux_windows_new(data, window_ms=200, step_ms=100, sampling_rate=1000
     n_windows = (data.shape[0] - window_samples) // step_samples + 1
     
     windowed_data = {ch: [] for ch in range(len(data[0]))}
-    
+    window_labels = {dof: [] for dof in labels.keys()}
+    window_indices = []
     for i in range(n_windows):
         start = i * step_samples
         end = start + window_samples
         if end > data.shape[0]:
             break
-        for ch_idx, ch_name in enumerate(range(len(data[0]))):
-            windowed_data[ch_name].append(data[start:end, ch_idx])
-    
-    return pd.DataFrame(windowed_data)
+
+        window_label_segment = labels["original_labels"][start:end]
+        unique_labels = np.unique(window_label_segment)
+
+        if len(unique_labels) == 1 and unique_labels[0] != -1:
+
+            for ch_idx, ch_name in enumerate(range(len(data[0]))):
+                windowed_data[ch_name].append(data[start:end, ch_idx])
+
+            for dof in labels.keys():
+                window_labels[dof] = np.unique(labels[dof][start:end])[0]
+
+            window_indices.append(i)
+
+    df = pd.DataFrame(windowed_data)
+    df['label'] = window_labels
+    df['window_index'] = window_indices
+
+    print("Created windows with unique labels.")
+    return df
 
 def notch_filter(df, fs=1000, freq=50.0, q=30.0):
     """Remove power line interference at 50 Hz (or 60 Hz for US)"""
@@ -62,7 +79,7 @@ def notch_filter(df, fs=1000, freq=50.0, q=30.0):
     filtered_df = df.copy()
     for col in df.columns:
         # Skip non-time-series columns
-        if col == 'window_index':
+        if col == 'window_index' or col == 'label':
             continue
         # Apply filter only to columns that contain arrays
         filtered_df[col] = df[col].apply(lambda x: signal.filtfilt(b, a, x) if isinstance(x, (list, np.ndarray)) and len(x) > 1 else x)
@@ -80,7 +97,7 @@ def passband_filter(df, fs=1000, lowcut=20.0, highcut=300.0, order=4):
     filtered_df = df.copy()
     for col in df.columns:
         # Skip non-time-series columns
-        if col == 'window_index':
+        if col == 'window_index' or col == 'label':
             continue
         # Apply filter only to columns that contain arrays
         filtered_df[col] = df[col].apply(lambda x: signal.filtfilt(b, a, x) if isinstance(x, (list, np.ndarray)) and len(x) > 1 else x)

@@ -5,13 +5,14 @@ import pandas as pd
 import numpy as np
 import pyxdf
 
-def find_bids_emg_files(bids_root, subject, session=None, task=None, run=None):
+def find_bids_emg_files(data_dir, subject, session=None, task=None, run=None):
     """
     Return list of (xdf_path, events_path, json_path) for one subject/session/task.
+    data_dir must include data/raw
     """
-    subj_dir = os.path.join(bids_root, "data")
-    subj_dir = os.path.join(subj_dir, "raw")
-    subj_dir = os.path.join(subj_dir, f"sub-{subject}")
+    #subj_dir = os.path.join(bids_root, "data")
+    #subj_dir = os.path.join(subj_dir, "raw")
+    subj_dir = os.path.join(data_dir, f"sub-{subject}")
     if session:
         subj_dir = os.path.join(subj_dir, f"ses-{session}")
     #if task:
@@ -35,39 +36,22 @@ def find_bids_emg_files(bids_root, subject, session=None, task=None, run=None):
     files = [f for f in os.listdir(emg_dir) if re.match(pattern, f)]
     return [os.path.join(emg_dir, f) for f in files]
 
-def load_emg_bids(bids_root, subject, session=None, task=None, run=None, label_column="event_label"):
+def load_emg_bids(data_dir, subject, session=None, task=None, run=None, label_column="event_label"):
     """
     Load EMG data and labels from a BIDS-compliant directory.
     Returns: X (samples x channels), y (labels)
     """
-    xdf_files = find_bids_emg_files(bids_root, subject, session, task, run)
+    xdf_files = find_bids_emg_files(data_dir, subject, session, task, run)
     if len(xdf_files) == 0:
-        raise FileNotFoundError(f"No EMG EDF found for task={task}")
+        raise FileNotFoundError(f"No EMG XDF found for task={task}")
 
     xdf_path = xdf_files[0]  # assuming one run
     base_prefix = xdf_path.replace("_emg.xdf", "")
     events_path = base_prefix + "_events.tsv"
 
     # --- Load EMG signal ---
-    """ raw = mne.io.read_raw_edf(xdf_path, preload=True)
-    emg_data = raw.get_data().T  # shape: (n_samples, n_channels)
-    sfreq = raw.info["sfreq"] """
     streams, header = pyxdf.load_xdf(xdf_path)
-    """ data = streams[0]["time_series"].T
-    sfreq = float(streams[0]["info"]["nominal_srate"][0])
-    info = mne.create_info(3, sfreq, ["eeg", "eeg", "stim"])
-    raw = mne.io.RawArray(data, info)
-    raw.plot(scalings=dict(eeg=100e-6), duration=1, start=14) """
 
-    # --- Load events ---
-    #events_df = pd.read_csv(events_path, sep="\t")
-
-    #if label_column not in events_df.columns:
-    #    raise ValueError(f"Missing {label_column} in events.tsv")
-
-    # Align EMG and events (simple approach: expand labels per time window)
-    #y = events_df[label_column].to_numpy()
-    y=None
     return streams, header
 
 def get_emg_channels(streams):

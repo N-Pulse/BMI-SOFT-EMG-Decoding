@@ -1,17 +1,20 @@
-from data_loading_xdf import load_emg_bids, find_bids_emg_files, get_emg_channels
-from trigger_to_label import map_triggers_to_labels, convert_labels_to_dof_dict
 import argparse
 import sys
 import os
 import re
 import numpy as np
 
-def get_emg_labels_from_path(repo_root, subject="P005", session="S002", task="Default", run="001_eeg_up"):
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
+from libML.data_loading_xdf import load_emg_bids, find_bids_emg_files, get_emg_channels
+from libML.trigger_to_label import map_triggers_to_labels, convert_labels_to_dof_dict
+
+def get_emg_labels_from_path(data_dir, subject="P005", session="S002", task="Default", run="001_eeg_up"):
     """
     Load EMG data and labels from a BIDS-compliant directory.
     Returns: X (samples x channels), y (labels)
     """
-    streams, header = load_emg_bids(repo_root, subject=subject, session=session, task=task, run=run)
+    streams, header = load_emg_bids(data_dir, subject=subject, session=session, task=task, run=run)
 
     emg_channels = get_emg_channels(streams)
     trigger_labels = streams[0]
@@ -24,17 +27,6 @@ def get_emg_labels_from_path(repo_root, subject="P005", session="S002", task="De
 def load_single_emg_file(repo_root, strength_and_speed=False, subject="P005", session="S002", task="Default", run="001_eeg_up"):
     """
     Load EMG data and labels from a BIDS-compliant directory.
-    
-    Args:
-        repo_root (str): Root path to BIDS dataset
-        strength_and_speed (bool): Include DoF describing strength and speed of the movement
-        subject (str): Subject ID (e.g., "P005")
-        session (str): Session ID (e.g., "S002") 
-        task (str): Task name (e.g., "Default")
-        run (str): Run identifier (e.g., "001_eeg_up")
-    
-    Returns:
-        labeled_data (dict): Dictionary with keys 'time_series' (EMG data) and 'labels' (corresponding labels)
     """
     try:
         print(f"Loading EMG data for subject {subject}, session {session}, task {task}, run {run}")
@@ -45,14 +37,24 @@ def load_single_emg_file(repo_root, strength_and_speed=False, subject="P005", se
             raise ValueError(f"No EMG data found for the specified parameters")
         
         emg_channels = get_emg_channels(streams)
+
         trigger_stream = streams[0]
-        
         labeled_data = map_triggers_to_labels(emg_channels, trigger_stream)
 
-        X_raw = np.array(labeled_data['time_series'])  # Convert to numpy array
-        y_raw = np.array(labeled_data['labels'])       # Convert to numpy array
+        # Try with explicit dtype conversion
+        try:
+            X_raw = np.array(labeled_data['time_series'], dtype=np.float32)
+        except OverflowError:
+            print("Warning: Overflow in time_series, trying float64")
+            X_raw = np.array(labeled_data['time_series'], dtype=np.float64)
         
-        timestamps = np.array(labeled_data['time_stamps'])
+        try:
+            y_raw = np.array(labeled_data['labels'], dtype=np.int32)
+        except OverflowError:
+            print("Warning: Overflow in labels, trying int64")
+            y_raw = np.array(labeled_data['labels'], dtype=np.int64)
+            
+        timestamps = np.array(labeled_data['time_stamps'], dtype=np.float64)
 
         print(f"Successfully loaded.")
 
@@ -72,6 +74,8 @@ def load_single_emg_file(repo_root, strength_and_speed=False, subject="P005", se
     
     except Exception as e:
         print(f"Error loading EMG data: {e}")
+        import traceback
+        traceback.print_exc()
         return None
     
 
@@ -114,11 +118,17 @@ def load_emg_data(repo_root, strength_and_speed=False, **filters):
 
     # 2. Compile BIDS regex to parse filenames
     # This pattern captures sub, ses, task, and run from a path
+    # bids_pattern = re.compile(
+    #     r'sub-([a-zA-Z0-9]+)'         # Group 1: subject
+    #     r'(?:_ses-([a-zA-Z0-9]+))?'   # Group 2: session (optional)
+    #     r'(?:_task-([a-zA-Z0-9]+))?'  # Group 3: task (optional)
+    #     r'(?:_run-([a-zA-Z0-9_]+))?'  # Group 4: run (optional)
+    # )
     bids_pattern = re.compile(
-        r'sub-([a-zA-Z0-9]+)'         # Group 1: subject
-        r'(?:_ses-([a-zA-Z0-9]+))?'   # Group 2: session (optional)
-        r'(?:_task-([a-zA-Z0-9]+))?'  # Group 3: task (optional)
-        r'(?:_run-([a-zA-Z0-9_]+))?'  # Group 4: run (optional)
+        r'sub-([a-zA-Z0-9]+)'           # Group 1: subject
+        r'(?:_ses-([a-zA-Z0-9]+))?'     # Group 2: session (optional)
+        r'(?:_task-([a-zA-Z0-9]+))?'    # Group 3: task (optional)  
+        r'(?:_run-([a-zA-Z0-9_\-]+))?'  # Group 4: run (optional) - now allows underscores AND hyphens
     )
 
     # 3. Walk the directory and find all files that match the BIDS pattern
@@ -126,8 +136,9 @@ def load_emg_data(repo_root, strength_and_speed=False, **filters):
     for root, dirs, files in os.walk(repo_root):
         for file in files:
             # Look for common data file extensions
-            if file.endswith(('.vhdr', '.eeg', '.vmrk', '.edf', '.bdf', '.gdf', '.set')):
-                match = bids_pattern.search(os.path.join(root, file))
+            if file.endswith(('.vhdr', '.eeg', '.vmrk', '.edf', '.bdf', '.xdf', '.gdf', '.set')):
+                print(os.path.join(root, file))
+                match = bids_pattern.search(file) #os.path.join(root, file)
                 if match:
                     discovered_files.append(match)
 

@@ -1,10 +1,13 @@
 import os
+import sys
 import yaml
 import numpy as np
 import pandas as pd
 import joblib
 
 from sklearn.model_selection import GridSearchCV, KFold, cross_val_score, train_test_split
+
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from libML.data_load_and_label_for_training import load_emg_data
 from libML.models import choose_model
@@ -14,7 +17,7 @@ from libML.preprocessing_new import segment_aux_windows_new, notch_filter, passb
 from libML.feature_engineering import extract_window_features
 
 CONFIG = yaml.safe_load(open("config.yml"))
-
+#TODO: Put all parameters in config file
 # --- File/Directory Paths
 PATHS = CONFIG.get('paths', {})
 DATA_DIR = PATHS.get('raw_data_dir', './data/raw/')
@@ -50,6 +53,40 @@ ALL_PARAM_GRIDS = MODELING.get('param_grids', {})
 NUM_TRIALS = MODELING.get('num_trials', 10)
 N_SPLITS = MODELING.get('n_splits', 4)
 
+def get_features(data_dict):
+    # Get windows 
+    X = data_dict["X"]
+    y = data_dict["y"]
+    windowed_df = segment_aux_windows_new(X, y)
+    
+    # Apply preprocessing steps (filtering)
+    preproc_df = notch_filter(windowed_df)
+    preproc_df = passband_filter(preproc_df) 
+
+    # Get features from windows
+    # features_df contains all 6 channels with each feature --> 6*21 = 126 columns, named for example 0_AR4 --> channel id + _ + feature name
+    # + 2 columns for label and window index so we have 128 columns    
+    features_list = []
+    for idx in range(len(preproc_df)):
+        window_features = {}
+        for ch in preproc_df.columns:
+            if ch == 'label' or ch == 'window_index':
+                continue
+            signal_window = preproc_df.loc[idx, ch]
+            ch_features = extract_window_features(signal_window, fs=1000)
+            
+            # Prefix with channel name
+            for feat_name, feat_val in ch_features.items():
+                window_features[f"{ch}_{feat_name}"] = feat_val
+
+        window_features['window_index'] = preproc_df.loc[idx, 'window_index']
+        window_features['label'] = preproc_df.loc[idx, 'label']
+        
+        features_list.append(window_features)
+
+    features_df = pd.DataFrame(features_list)
+    return features_df
+
 
 def main():
 
@@ -75,57 +112,33 @@ def main():
         4) final_processed_df = pd.concat(all_sessions_data, ignore_index=True)
         5) Save features to avoid to compute it each time. to parquet ?
         '''
-
         # 1. Load data and 2. Map triggers into labels
         if os.path.exists(DATA_DIR):
             #emg_raw_data = load_emg_data(DATA_DIR)
             # load_emg_data loads data for one specific run/task/session/subject combination, execute in a loop to get data from all subjects and sessions available (default: subject="P005", session="S002", task="Default", run="001_eeg_up")
+            # For now only one run to test
             data_list = load_emg_data(DATA_DIR, subject="P005", session="S002", task="Default", run="001_eeg_up") # list of dict
             # 3.3) done
 
             # ...
 
         # 3. Preprocessing
-        # TODO:
         ## Resample at processing.sample_rate_hz
         ## Filter using bandpass + Notch
         ## Windowing -> feature extraction
         ## Feature standardization -> save generic scalers
+
+        # Get features for all data available
+        processed_data_list = []
         for run in data_list:
-            X_raw = run["X"]
-            # Get windows 
-            windowed_df = segment_aux_windows_new(X_raw)
-            # Apply preprocessing steps (filtering)
-            preproc_df = notch_filter(windowed_df)
-            preproc_df = passband_filter(preproc_df) 
-
-            # Get features from windows
-            # features_df contains all 6 channels with each feature --> 6*21 = 126 columns, named for example 0_AR4 --> channel id + _ + feature name
-            features_list = []
-            for idx in range(len(preproc_df)):
-                window_features = {}
-                
-                for ch in preproc_df.columns:
-                    signal_window = preproc_df.loc[idx, ch]
-                    ch_features = extract_window_features(signal_window, fs=1000)
-                    
-                    # Prefix with channel name
-                    for feat_name, feat_val in ch_features.items():
-                        window_features[f"{ch}_{feat_name}"] = feat_val
-                
-                features_list.append(window_features)
-
-            features_df = pd.DataFrame(features_list)
-            processed_data = features_df
-
-            # TODO: How to map features to timestamps? or better, the opposite
-            # give labels to features set
-            # so need to label windows --> discard windows with multiple labels
-
-
+            # Get features for 1 run
+            print("Getting features ...")
+            processed_data = get_features(run)
+            processed_data_list.append(processed_data)
+            print("Got features!")
 
         # Save preprocessed data
-        save_features_to_disk(processed_data, PROCESSED_DATA_PATH)
+        save_features_to_disk(processed_data_list, PROCESSED_DATA_PATH)
 
     # 4. Train-test-split (by subject or session)
     X_train, y_train, X_test, y_test = ...
