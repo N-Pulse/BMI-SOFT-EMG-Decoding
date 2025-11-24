@@ -142,128 +142,148 @@ def map_protocol_to_label(trigger_labels):
     Label = -1 is for non interesting data
 
     """
+    # Convert to numpy array with safe dtype first
+    if not isinstance(trigger_labels, np.ndarray):
+        trigger_labels = np.array(trigger_labels, dtype=np.int64)
+    else:
+        trigger_labels = trigger_labels.astype(np.int64)
+    
+    new_labels = np.full_like(trigger_labels, -1, dtype=np.int64)
     
     for i in range(len(trigger_labels)):
         label = trigger_labels[i]
 
         # Special codes
-        if label == 9701 or label == 9702 :
-            if i != 0 :
-                trigger_labels[i] = -1 #trigger_labels[i-1] #
-            if i == 0 : # in case we start the recording in resting state, which should not happen
-                trigger_labels[i] = -1 #00000000 # to be defined 
+        if label == 9701 or label == 9702:
+            if i != 0:
+                new_labels[i] = -1  # or new_labels[i-1] if you want to carry forward
+            else:  # in case we start the recording in resting state
+                new_labels[i] = -1
             continue
-        if label in [8888, 9999, 8899] :
-            trigger_labels[i] = -1
+        if label in [8888, 9999, 8899]:
+            new_labels[i] = -1
             continue
 
         # Get codes
-        phase_label = label//10000
-        arm_label = (label-phase_label*10000)//1000 # dont care actually
-        baseline_label = (label-phase_label*10000-arm_label*1000)//100
-        movement_label = label-phase_label*10000-arm_label*1000-baseline_label*100
-        #print(f"Label: {label}, Phase: {phase_label}, Arm: {arm_label}, Baseline: {baseline_label}, Movement: {movement_label}")
+        phase_label = label // 10000
+        arm_label = (label - phase_label * 10000) // 1000  # don't care actually
+        baseline_label = (label - phase_label * 10000 - arm_label * 1000) // 100
+        movement_label = label - phase_label * 10000 - arm_label * 1000 - baseline_label * 100
+        
         new_label = 0
 
         # No movements
-        if phase_label not in [3,4] : # move and return
-            trigger_labels[i] = -1 # not interesting for training
+        if phase_label not in [3, 4]:  # move and return
+            new_labels[i] = -1  # not interesting for training
             continue
 
         # Disregarded movements
         if movement_label in []:
-            trigger_labels[i] = -1
+            new_labels[i] = -1
             continue
 
         # Movements
-        if phase_label in [3,4] :
-            # Thumb flex/rest/ext --> 0/1/2
-            if movement_label in [3,4,5,6,10,15,16,22]: # flexed
-                new_label += 0 * 10e-1
-            if movement_label in [7,8,11,12,13,14,17,18,19,20,21,23,24,25,26]: # rest
-                new_label += 1 * 10e-1
-            if movement_label in [1,2,9,27]: # extended
-                new_label += 2 * 10e-1
+        if phase_label in [3, 4]:
+            # Use proper base-10 encoding instead of floating point exponents
+            # Each digit gets its own place value (10^0, 10^1, 10^2, etc.)
             
-            # Index flex/rest/ext --> 0/1/2
-            if movement_label in [3,4,5,6,8,15,16,21]: # flexed
-                new_label += 0 * 10e0
-            if movement_label in [9,10,11,12,13,14,17,18,19,20,22,23,24,25,27]: # rest
-                new_label += 1 * 10e0
-            if movement_label in [1,2,7,26]: # extended
-                new_label += 2 * 10e0
+            # Thumb flex/rest/ext --> 0/1/2 (1st digit)
+            if movement_label in [3, 4, 5, 6, 10, 15, 16, 22]:  # flexed
+                digit = 0
+            elif movement_label in [7, 8, 11, 12, 13, 14, 17, 18, 19, 20, 21, 23, 24, 25, 26]:  # rest
+                digit = 1
+            else:  # movement_label in [1, 2, 9, 27] - extended
+                digit = 2
+            new_label += digit * (10 ** 0)
 
-            # Middle flex/rest/ext --> 0/1/2
-            if movement_label in [3,4,5,6,8,15,16,20]: # flexed
-                new_label += 0 * 10e1
-            if movement_label in [9,10,11,12,13,14,17,18,19,21,22,23,24,26,27]: # rest
-                new_label += 1 * 10e1
-            if movement_label in [1,2,7,25]: # extended
-                new_label += 2 * 10e1
-            
-            # Ring flex/rest/ext --> 0/1/2
-            if movement_label in [3,4,5,6,8,15,16,19]: # flexed
-                new_label += 0 * 10e2
-            if movement_label in [9,10,11,12,13,14,17,18,20,21,22,23,25,26,27]: # rest
-                new_label += 1 * 10e2
-            if movement_label in [1,2,7,24]: # extended
-                new_label += 2 * 10e2
-            
-            # Pinky flex/rest/ext --> 0/1/2
-            if movement_label in [3,4,5,6,8,15,16,18]: # flexed
-                new_label += 0 * 10e3
-            if movement_label in [9,10,11,12,13,14,17,19,20,21,22,24,25,26,27]: # rest
-                new_label += 1 * 10e3
-            if movement_label in [1,2,7,23]: # extended
-                new_label += 2 * 10e3
+            # Index flex/rest/ext --> 0/1/2 (2nd digit)
+            if movement_label in [3, 4, 5, 6, 8, 15, 16, 21]:  # flexed
+                digit = 0
+            elif movement_label in [9, 10, 11, 12, 13, 14, 17, 18, 19, 20, 22, 23, 24, 25, 27]:  # rest
+                digit = 1
+            else:  # movement_label in [1, 2, 7, 26] - extended
+                digit = 2
+            new_label += digit * (10 ** 1)
 
-            # Supination codes --> 0/1/2 and 6th degree of freedom
-            if baseline_label == 1 : # palm/fist up
-                new_label += 0 * 10e4
-            if baseline_label == 2 : # palm/fist side
-                new_label += 1 * 10e4
-            if baseline_label == 3 : # palm/fist down
-                new_label += 2 * 10e4
+            # Middle flex/rest/ext --> 0/1/2 (3rd digit)
+            if movement_label in [3, 4, 5, 6, 8, 15, 16, 20]:  # flexed
+                digit = 0
+            elif movement_label in [9, 10, 11, 12, 13, 14, 17, 18, 19, 21, 22, 23, 24, 26, 27]:  # rest
+                digit = 1
+            else:  # movement_label in [1, 2, 7, 25] - extended
+                digit = 2
+            new_label += digit * (10 ** 2)
 
-            # Wrist codes, Palm facing down then: Up(-90)/Straight(0)/Down(90)  -->  0/1/2
+            # Ring flex/rest/ext --> 0/1/2 (4th digit)
+            if movement_label in [3, 4, 5, 6, 8, 15, 16, 19]:  # flexed
+                digit = 0
+            elif movement_label in [9, 10, 11, 12, 13, 14, 17, 18, 20, 21, 22, 23, 25, 26, 27]:  # rest
+                digit = 1
+            else:  # movement_label in [1, 2, 7, 24] - extended
+                digit = 2
+            new_label += digit * (10 ** 3)
+
+            # Pinky flex/rest/ext --> 0/1/2 (5th digit)
+            if movement_label in [3, 4, 5, 6, 8, 15, 16, 18]:  # flexed
+                digit = 0
+            elif movement_label in [9, 10, 11, 12, 13, 14, 17, 19, 20, 21, 22, 24, 25, 26, 27]:  # rest
+                digit = 1
+            else:  # movement_label in [1, 2, 7, 23] - extended
+                digit = 2
+            new_label += digit * (10 ** 4)
+
+            # Supination codes --> 0/1/2 (6th digit)
+            if baseline_label == 1:  # palm/fist up
+                digit = 0
+            elif baseline_label == 2:  # palm/fist side
+                digit = 1
+            else:  # baseline_label == 3 - palm/fist down
+                digit = 2
+            new_label += digit * (10 ** 5)
+
+            # Wrist codes (7th digit)
             if movement_label in [13, 14]:
-                new_label += 0 * 10e5
-            if movement_label in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]:
-                new_label += 1 * 10e5
-            if movement_label in [11, 12]:
-                new_label += 2 * 10e5
+                digit = 0  # Up(-90)
+            elif movement_label in [11, 12]:
+                digit = 2  # Down(90)
+            else:  # Straight(0)
+                digit = 1
+            new_label += digit * (10 ** 6)
 
-            # Thumb abduction --> extended dorsal / rest / extended palmar --> 0/1/2
-            if movement_label in [1, 2, 9, 27]: # dorsal
-                new_label += 0 * 10e6
-            if movement_label in [7, 8, 11, 12, 13, 14, 18, 19, 20, 21, 22, 23, 24, 25, 26]: # rest
-                new_label += 1 * 10e6
-            if movement_label in [3, 4, 5, 6, 10, 15, 16, 17, 22]: # palmar 
-                new_label += 2 * 10e6
-            
-            # Strength --> not specified, low, medium, high --> 0/1/2/3
-            if movement_label in [1,2,3,4,7,8,9,10,15,16,17,18,19,20,21,22,23,24,25,26,27]: # not specified
-                new_label += 0 * 10e7
-            if movement_label in []: # low
-                new_label += 1 * 10e7
-            if movement_label in [5,12,13]: # normal 
-                new_label += 2 * 10e7
-            if movement_label in [6,11,14]: # high 
-                new_label += 3 * 10e7
-            
-            # Speed --> not specified, low, medium, high --> 0/1/2/3
-            if movement_label in [5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27]: # not specified
-                new_label += 0 * 10e8
-            if movement_label in [1,3]: # low
-                new_label += 1 * 10e8
-            if movement_label in []: # normal 
-                new_label += 2 * 10e8
-            if movement_label in [2,4]: # high 
-                new_label += 3 * 10e8
+            # Thumb abduction (8th digit)
+            if movement_label in [1, 2, 9, 27]:  # dorsal
+                digit = 0
+            elif movement_label in [7, 8, 11, 12, 13, 14, 18, 19, 20, 21, 22, 23, 24, 25, 26]:  # rest
+                digit = 1
+            else:  # movement_label in [3, 4, 5, 6, 10, 15, 16, 17, 22] - palmar
+                digit = 2
+            new_label += digit * (10 ** 7)
 
+            # Strength (9th digit)
+            if movement_label in [5, 12, 13]:  # normal
+                digit = 2
+            elif movement_label in [6, 11, 14]:  # high
+                digit = 3
+            elif movement_label in []:  # low
+                digit = 1
+            else:  # not specified
+                digit = 0
+            new_label += digit * (10 ** 8)
 
-        trigger_labels[i] = new_label
-    return trigger_labels
+            # Speed (10th digit)
+            if movement_label in [1, 3]:  # low
+                digit = 1
+            elif movement_label in [2, 4]:  # high
+                digit = 3
+            elif movement_label in []:  # normal
+                digit = 2
+            else:  # not specified
+                digit = 0
+            new_label += digit * (10 ** 9)
+
+        new_labels[i] = new_label
+    
+    return new_labels
 
 def convert_labels_to_dof_dict(y, strength_and_speed: bool):
     """
