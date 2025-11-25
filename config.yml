@@ -10,9 +10,16 @@ processing:
   window_size_ms: 200
   window_step_ms: 50
 
+filters:
+  # Lists corresponding to files that we want to train on
+  subjects: ["P005"]
+  sessions: ["S002"]
+  tasks: ["Default"]
+  runs: ["001_eeg_up"]
+
 modeling:
   # List of all Degrees of Freedom (DoF) to train models for.
-  # The label processing function must produce columns matching these names.
+  # TODO: The label processing function must produce columns matching these names.
   dof_list:
     - "wrist_flex_ext"
     - "wrist_pro_sup"

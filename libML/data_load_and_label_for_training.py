@@ -118,12 +118,6 @@ def load_emg_data(repo_root, strength_and_speed=False, **filters):
 
     # 2. Compile BIDS regex to parse filenames
     # This pattern captures sub, ses, task, and run from a path
-    # bids_pattern = re.compile(
-    #     r'sub-([a-zA-Z0-9]+)'         # Group 1: subject
-    #     r'(?:_ses-([a-zA-Z0-9]+))?'   # Group 2: session (optional)
-    #     r'(?:_task-([a-zA-Z0-9]+))?'  # Group 3: task (optional)
-    #     r'(?:_run-([a-zA-Z0-9_]+))?'  # Group 4: run (optional)
-    # )
     bids_pattern = re.compile(
         r'sub-([a-zA-Z0-9]+)'           # Group 1: subject
         r'(?:_ses-([a-zA-Z0-9]+))?'     # Group 2: session (optional)

@@ -27,6 +27,13 @@ SCALER_OUTPUT_DIR = PATHS.get('scaler_output_dir', './results/scaler/')
 BEST_PARAMS_OUTPUT_DIR = PATHS.get('best_params_output_dir', './results/params/')
 FIG_OUTPUT_DIR = PATHS.get('fig_output_dir', './results/figures')
 
+# --- Patient filters
+FILTERS = CONFIG.get('filters', {})
+SUBJECTS = FILTERS.get('subjects', "P005")
+SESSIONS = FILTERS.get('sessions', "S002")
+TASKS = FILTERS.get('tasks', "Default")
+RUNS = FILTERS.get('runs', "001_eeg_up")
+
 # --- Windowing & Feature Parameters
 PROC = CONFIG.get('processing', {})
 SAMPLE_RATE_HZ = PROC.get('sample_rate_hz', 2000)
@@ -114,13 +121,8 @@ def main():
         '''
         # 1. Load data and 2. Map triggers into labels
         if os.path.exists(DATA_DIR):
-            #emg_raw_data = load_emg_data(DATA_DIR)
-            # load_emg_data loads data for one specific run/task/session/subject combination, execute in a loop to get data from all subjects and sessions available (default: subject="P005", session="S002", task="Default", run="001_eeg_up")
-            # For now only one run to test
-            data_list = load_emg_data(DATA_DIR, subject="P005", session="S002", task="Default", run="001_eeg_up") # list of dict
-            # 3.3) done
-
-            # ...
+            # Loads data from all the filters
+            data_list = load_emg_data(DATA_DIR, subject=SUBJECTS, session=SESSIONS, task=TASKS, run=RUNS) # list of dict
 
         # 3. Preprocessing
         ## Resample at processing.sample_rate_hz
