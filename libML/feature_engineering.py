@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 import pywt
-import config
 from scipy.fft import fft, fftfreq
 
 
@@ -148,9 +147,11 @@ def extract_window_features(window, fs=1000):
 
 def create_features(input_path=None, output_path=None):
 
-    input_path = config.DATA_DIR / "preprocessed_aux_windows.pkl"
+    if input_path is None:
+        input_path = "./data/preprocessed_aux_windows.pkl"
 
-    output_path = config.DATA_DIR / "features_aux_windows.pkl"
+    if output_path is None:
+        output_path = "./data/features_aux_windows.pkl"
     
     # Load preprocessed windowed data
     df_windowed = pd.read_pickle(input_path)

@@ -140,10 +140,24 @@ def main():
             print("Got features!")
 
         # Save preprocessed data
-        save_features_to_disk(processed_data_list, PROCESSED_DATA_PATH)
+        #save_features_to_disk(processed_data_list, PROCESSED_DATA_PATH)
 
     # 4. Train-test-split (by subject or session)
-    X_train, y_train, X_test, y_test = ...
+    all_data = pd.concat(processed_data_list, ignore_index=True)
+    
+    # Separate features from labels
+    label_cols = [col for col in all_data.columns if col.startswith('dof_')]
+    feature_cols = [col for col in all_data.columns if col not in label_cols + ['window_index', 'label']]
+    
+    X = all_data[feature_cols].values
+    y = {dof: all_data[dof].values for dof in label_cols}
+    
+    # Simple random split
+    X_train, X_test = train_test_split(X, test_size=TEST_SIZE, random_state=RANDOM_STATE)
+    y_train = {dof: train_test_split(y[dof], test_size=TEST_SIZE, random_state=RANDOM_STATE)[0] for dof in label_cols}
+    y_test = {dof: train_test_split(y[dof], test_size=TEST_SIZE, random_state=RANDOM_STATE)[1] for dof in label_cols}
+
+    breakpoint()
 
     # 5. Training models (loop for DoFs)
     trained_models = {}

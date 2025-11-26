@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 import pyxdf
-import config
 from scipy import signal
 
 
@@ -108,10 +107,12 @@ def passband_filter(df, fs=1000, lowcut=20.0, highcut=300.0, order=4):
 
 def preprocess(file_path=None, output_path=None):
 
-    file_path = config.DATA_DIR / "sub-P005_ses-S002_task-Default_run-001_eeg_up.xdf"
+    if file_path is None:
+        file_path = "./data/raw/sub-P005_ses-S002_task-Default_run-001_eeg_up.xdf"
     
-    output_path = config.DATA_DIR / "raw_aux_windows.pkl"
-    output_path_2 = config.DATA_DIR / "preprocessed_aux_windows.pkl"
+    if output_path is None:
+        output_path = "./data/raw_aux_windows.pkl"
+    output_path_2 = "./data/preprocessed_aux_windows.pkl"
     
     # Load XDF
     streams, _ = pyxdf.load_xdf(str(file_path))
