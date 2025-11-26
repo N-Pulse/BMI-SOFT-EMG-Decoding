@@ -42,9 +42,10 @@ def segment_aux_windows_new(data, labels, window_ms=200, step_ms=100, sampling_r
     step_samples = int((step_ms / 1000.0) * sampling_rate)
     n_windows = (data.shape[0] - window_samples) // step_samples + 1
     
-    windowed_data = {ch: [] for ch in range(len(data[0]))}
-    window_labels = {dof: [] for dof in labels.keys()}
+    windowed_data = {ch: [] for ch in range(data.shape[1])}  # Use data.shape[1] for safety
+    window_labels = {dof: [] for dof in labels.keys()}  # This creates lists for each DOF
     window_indices = []
+    
     for i in range(n_windows):
         start = i * step_samples
         end = start + window_samples
@@ -55,20 +56,34 @@ def segment_aux_windows_new(data, labels, window_ms=200, step_ms=100, sampling_r
         unique_labels = np.unique(window_label_segment)
 
         if len(unique_labels) == 1 and unique_labels[0] != -1:
-
-            for ch_idx, ch_name in enumerate(range(len(data[0]))):
-                windowed_data[ch_name].append(data[start:end, ch_idx])
-
+            # Append data for each channel
+            for ch_idx in range(data.shape[1]):
+                windowed_data[ch_idx].append(data[start:end, ch_idx])
+                
             for dof in labels.keys():
-                window_labels[dof] = np.unique(labels[dof][start:end])[0]
+                if dof != "original_labels":  # Skip original_labels if it's not a DOF
+                    unique_dof_labels = np.unique(labels[dof][start:end])
+                    if len(unique_dof_labels) == 1:
+                        window_labels[dof].append(unique_dof_labels[0])
+                    else:
+                        # Handle mixed labels in window - use majority vote or skip
+                        window_labels[dof].append(unique_dof_labels[0])  # or use mode
 
             window_indices.append(i)
 
+    # Create DataFrame
     df = pd.DataFrame(windowed_data)
-    df['label'] = window_labels
+    
+    # Add labels as columns
+    for dof in labels.keys():
+        if dof != "original_labels" and len(window_labels[dof]) > 0:
+            df[dof + '_label'] = window_labels[dof]
+    
     df['window_index'] = window_indices
 
-    print("Created windows with unique labels.")
+    print(f"Created {len(df)} windows with unique labels.")
+    print(f"Label distribution: {df['thumb_label'].value_counts() if 'thumb_label' in df.columns else 'Check column names'}")
+    
     return df
 
 def notch_filter(df, fs=1000, freq=50.0, q=30.0):

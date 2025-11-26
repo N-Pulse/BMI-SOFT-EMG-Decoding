@@ -66,6 +66,7 @@ def get_features(data_dict):
     y = data_dict["y"]
     windowed_df = segment_aux_windows_new(X, y)
     
+    #breakpoint()
     # Apply preprocessing steps (filtering)
     preproc_df = notch_filter(windowed_df)
     preproc_df = passband_filter(preproc_df) 
@@ -77,21 +78,34 @@ def get_features(data_dict):
     for idx in range(len(preproc_df)):
         window_features = {}
         for ch in preproc_df.columns:
-            if ch == 'label' or ch == 'window_index':
+            if not(ch in [0,1,2,3,4,5]):
                 continue
             signal_window = preproc_df.loc[idx, ch]
+            #print(idx, ch)
+            #print(signal_window)
             ch_features = extract_window_features(signal_window, fs=1000)
             
             # Prefix with channel name
             for feat_name, feat_val in ch_features.items():
                 window_features[f"{ch}_{feat_name}"] = feat_val
 
+        #preproc_df.keys()
         window_features['window_index'] = preproc_df.loc[idx, 'window_index']
-        window_features['label'] = preproc_df.loc[idx, 'label']
+        window_features['dof_1'] = preproc_df.loc[idx, 'dof_1_label']
+        window_features['dof_2'] = preproc_df.loc[idx, 'dof_2_label']
+        window_features['dof_3'] = preproc_df.loc[idx, 'dof_3_label']
+        window_features['dof_4'] = preproc_df.loc[idx, 'dof_4_label']
+        window_features['dof_5'] = preproc_df.loc[idx, 'dof_5_label']
+        window_features['dof_6'] = preproc_df.loc[idx, 'dof_6_label']
+        window_features['dof_7'] = preproc_df.loc[idx, 'dof_7_label']
+        window_features['dof_8'] = preproc_df.loc[idx, 'dof_8_label']
+        #window_features['dof_9'] = preproc_df.loc[idx, 'dof_9_label']
+        #window_features['dof_10'] = preproc_df.loc[idx, 'dof_10_label']
         
         features_list.append(window_features)
 
     features_df = pd.DataFrame(features_list)
+    #breakpoint()
     return features_df
 
 
@@ -157,7 +171,7 @@ def main():
     y_train = {dof: train_test_split(y[dof], test_size=TEST_SIZE, random_state=RANDOM_STATE)[0] for dof in label_cols}
     y_test = {dof: train_test_split(y[dof], test_size=TEST_SIZE, random_state=RANDOM_STATE)[1] for dof in label_cols}
 
-    breakpoint()
+    #breakpoint()
 
     # 5. Training models (loop for DoFs)
     trained_models = {}
