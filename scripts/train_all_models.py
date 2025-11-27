@@ -11,7 +11,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from libML.data_load_and_label_for_training import load_emg_data
 from libML.models import choose_model
-from libML.evaluation import compute_scores, plot_cv_scores
+from libML.evaluation import compute_scores, plot_cv_scores, plot_labels
 from libML.export import save_best_params, save_model
 from libML.preprocessing_new import segment_aux_windows_new, notch_filter, passband_filter
 from libML.feature_engineering import extract_window_features
@@ -54,11 +54,24 @@ RANDOM_STATE = MODELING.get('random_state', 42)
 TEST_SIZE = MODELING.get('test_size', 0.2)
 
 # Grid search
-HYPERPARAMETER_SEARCH = MODELING.get('hyperparam_search', True)
+HYPERPARAMETER_SEARCH = MODELING.get('hyperparam_search', False)
 NESTED_CV = MODELING.get('nested_cv', False)
 ALL_PARAM_GRIDS = MODELING.get('param_grids', {})
 NUM_TRIALS = MODELING.get('num_trials', 10)
-N_SPLITS = MODELING.get('n_splits', 4)
+N_SPLITS = MODELING.get('cv', 5)
+
+MAP_DOF_NAME_TO_ID = {
+        "thumb_flex_ext": "dof_1",
+        "index_flex_ext": "dof_2",
+        "middle_flex_ext": "dof_3",
+        "ring_flex_ext": "dof_4",
+        "pinky_flex_ext": "dof_5",
+        "wrist_pro_sup": "dof_6",
+        "wrist_flex_ext": "dof_7",
+        "thumb_abd_add": "dof_8",
+        # "strength": "dof_9",
+        # "speed": "dof_10",
+    }
 
 def get_features(data_dict):
     # Get windows 
@@ -178,8 +191,15 @@ def main():
     for dof in DOF_LIST:
 
         # 5.1. Select corresponding labels
-        y_dof = y[dof] # labels corresponding to DoF
-        X_dof = X # features
+        print("\n")
+        print(f"Training model for {dof} ...")
+        # breakpoint()
+        y_dof_train = y_train[MAP_DOF_NAME_TO_ID[dof]] # labels corresponding to DoF
+        y_dof_test = y_test[MAP_DOF_NAME_TO_ID[dof]]
+
+        if len(np.unique(y_dof_train))==1 or len(np.unique(y_dof_test))==1:
+            print("Single label -> no classification")
+            continue
 
         # 5.2. Model
         model = choose_model(MODEL_TYPE, ALL_HYPERPARAMS, RANDOM_STATE)
@@ -187,42 +207,49 @@ def main():
         
         if HYPERPARAMETER_SEARCH:
             # 5.3. Hyperparameter search
+            print(f"Hyperparameter search ...")
             param_grid = ALL_PARAM_GRIDS.get(MODEL_TYPE, None)
             kfold = KFold(n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE)
 
             if NESTED_CV:
+                print(f"Nested CV ...")
                 scores = []
                 for i in range(NUM_TRIALS):
                     clf = GridSearchCV(model, param_grid, cv=kfold)
-                    score = cross_val_score(clf, X=X_train, y=y_train, cv=kfold)
+                    score = cross_val_score(clf, X=X_train, y=y_dof_train, cv=kfold)
                     scores[i] = score.mean()
                     best_params = clf.best_params_
                 plot_cv_scores(scores)
             else:
+                print(f"CV ...")
                 clf = GridSearchCV(
                     estimator=model,
                     param_grid=param_grid,
                     cv=kfold,
-                    n_jobs=-1,
-                    verbose=-1
                 )
-                clf.fit(X_train, y_train)
+                clf.fit(X_train, y_dof_train)
                 best_params = clf.best_params_
                 best_score = clf.best_score_
                 final_model = clf.best_estimator_
-                save_best_params(best_params, dof, BEST_PARAMS_OUTPUT_DIR)
+                save_best_params(best_params, MODEL_TYPE, dof, BEST_PARAMS_OUTPUT_DIR)
         else:
             # 5.4. Train model with best params
+            print(f"No hyperparameter search, direct training ...")
             final_model = model
-            final_model.fit(X_train, y_train)
+            best_params = final_model.get_params()
+            print(f"best params: {best_params}")
+            final_model.fit(X_train, y_dof_train)
 
         # 5.5. Evaluate
-        y_pred = model.predict(X_test)
-        test_scores = compute_scores(y_test, y_pred)
+        y_pred = final_model.predict(X_test)
+        test_scores = compute_scores(y_dof_test, y_pred)
+
+        save_plot_path = os.path.join(FIG_OUTPUT_DIR, f"{MODEL_TYPE}/plot_labels_{dof}.png")
+        # plot_labels(y_dof_test, y_pred, show=False, save_path=save_plot_path)
 
         # 5.6. Save generic model
-        save_model(model, dof, best_params, MODEL_OUTPUT_DIR)
-        trained_models[dof] = model
+        save_model(final_model, MODEL_TYPE, dof, MODEL_OUTPUT_DIR, scaler=None)
+        trained_models[dof] = final_model
 
 
 if __name__ == "__main__":

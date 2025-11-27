@@ -300,7 +300,7 @@ def convert_labels_to_dof_dict(y, strength_and_speed: bool):
     dof_4 = np.full(len(y), -1, dtype=int)  # Ring flexion
     dof_5 = np.full(len(y), -1, dtype=int)  # Little flexion
     dof_6 = np.full(len(y), -1, dtype=int)  # Supination
-    dof_7 = np.full(len(y), -1, dtype=int)  # Wrist angle
+    dof_7 = np.full(len(y), -1, dtype=int)  # Wrist flexion
     dof_8 = np.full(len(y), -1, dtype=int)  # Thumb abduction
     dof_9 = np.full(len(y), -1, dtype=int)  # Strength
     dof_10 = np.full(len(y), -1, dtype=int)  # Speed

@@ -1,5 +1,5 @@
 data/*
-!data/processed/
 
 results/*
-!results/models/
+
+libML/__pycache__/*

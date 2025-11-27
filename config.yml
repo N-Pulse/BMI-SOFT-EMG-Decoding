@@ -31,7 +31,7 @@ modeling:
     - "pinky_flex_ext"
 
   # Model to use: "LDA" or "LinearSVC"
-  model_type: "LDA"
+  model_type: "RandomForest"
 
   hyperparams:
     LDA:
@@ -45,25 +45,40 @@ modeling:
     DecisionTree:
       max_depth: 10
       criterion: "gini"
+    RandomForest:
+      n_estimators: 100
+      criterion: "gini"
+      max_features: sqrt
 
   param_grids:
     LDA:
-      solver: ["lsqr"]
+      solver: ["lsqr", "eigen"]
       shrinkage: ["auto"]
     SVM:
+      loss: ["hinge", "squared_hinge"]
       dual: ["auto"]
-      max_iter: [10000]
-      C: [1.0]
+      max_iter: [10000, 100000]
+      C: [0.01, 0.1, 1.0]
+      multi_class: ["ovr", "crammer_singer"]
     GaussianNB: {}
     DecisionTree:
       max_depth: [10]
       criterion: ["gini"]
-  
+    RandomForest:
+      n_estimators: [50, 100, 500]
+      criterion: ["gini", "entropy", "log_loss"]
+      max_features: ["sqrt", "log2"]
+
   # For reproducible train/test splits
   random_state: 42
   
   # Percentage of data to hold out for the test set
   test_size: 0.2
 
-  # Number of cross validation
+  hyperparam_search: False
+
+  nested_cv: False
+
+  num_trials: 10
+
   cv: 5
