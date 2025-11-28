@@ -6,9 +6,11 @@ def compute_scores(y_test, y_pred):
     accuracy = accuracy_score(y_test, y_pred)
     # precision = precision_score(y_test, y_pred)
     # recall = recall_score(y_test, y_pred)
-    # f1 = f1_score(y_test, y_pred)
+    #f1 = f1_score(y_test, y_pred)
     # print(f"Accuracy: {accuracy}, Precision: {precision}, Recall: {recall}, F1-Score: {f1}")
-    print(f"Accuracy: {accuracy}")
+    print(f"Accuracy: {100*accuracy:.2f} %")
+    #print(f"F1 Score: {100*f1:.2f} %")
+
     return accuracy#, precision, recall, f1
 
 def plot_cv_scores(scores):

@@ -4,8 +4,12 @@ import yaml
 import numpy as np
 import pandas as pd
 import joblib
+from joblib import Parallel, delayed
+import time
+import json
 
 from sklearn.model_selection import GridSearchCV, KFold, cross_val_score, train_test_split
+from sklearn.preprocessing import StandardScaler, RobustScaler
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
@@ -26,6 +30,8 @@ MODEL_OUTPUT_DIR = PATHS.get('model_output_dir', './results/models/')
 SCALER_OUTPUT_DIR = PATHS.get('scaler_output_dir', './results/scaler/')
 BEST_PARAMS_OUTPUT_DIR = PATHS.get('best_params_output_dir', './results/params/')
 FIG_OUTPUT_DIR = PATHS.get('fig_output_dir', './results/figures')
+TIMING_OUTPUT_DIR = PATHS.get('timing_output_dir', './results/timing/')
+SCALER_OUTPUT_DIR = PATHS.get('scaler_output_dir', './results/scaler/')
 
 # --- Patient filters
 FILTERS = CONFIG.get('filters', {})
@@ -121,6 +127,152 @@ def get_features(data_dict):
     #breakpoint()
     return features_df
 
+def train_dof_model(dof, X_train, y_train, X_test, y_test):
+    """Train and evaluate model for a single DOF"""
+    print(f"Training model for {dof} ...")
+
+    timing_data = {'dof': dof, 'model_type': MODEL_TYPE}
+    start_time = time.time()
+
+    y_dof_train = y_train[MAP_DOF_NAME_TO_ID[dof]]
+    y_dof_test = y_test[MAP_DOF_NAME_TO_ID[dof]]
+    
+    if len(np.unique(y_dof_train)) == 1 or len(np.unique(y_dof_test)) == 1:
+        print("Single label -> no classification")
+        return dof, None, None, None, timing_data
+    
+    model = choose_model(MODEL_TYPE, ALL_HYPERPARAMS, RANDOM_STATE)
+    best_params = None
+    
+    if HYPERPARAMETER_SEARCH:
+        search_start = time.time()
+        # Your existing hyperparameter search code with n_jobs=-1
+        clf = GridSearchCV(model, ALL_PARAM_GRIDS[MODEL_TYPE], cv=KFold(n_splits=N_SPLITS), n_jobs=-1, return_train_score=True)
+        clf.fit(X_train, y_dof_train)
+        search_time = time.time() - search_start
+        best_params = clf.best_params_
+        timing_data['hyperparameter_search_time'] = search_time
+        timing_data['best_score'] = clf.best_score_
+        timing_data['best_params'] = best_params
+        final_model = clf.best_estimator_
+    else:
+        training_start = time.time()
+        final_model = model.fit(X_train, y_dof_train)
+        training_time = time.time() - training_start
+        best_params = final_model.get_params()
+        timing_data['training_time'] = training_time
+        timing_data['best_params'] = best_params
+    
+    total_time = time.time() - start_time
+    timing_data['total_time'] = total_time
+
+    # Evaluate
+    y_pred = final_model.predict(X_test)
+    test_scores = compute_scores(y_dof_test, y_pred)
+    
+    return dof, final_model, test_scores, best_params, timing_data
+
+def save_timing_and_params(timing_data, best_params, model_type, dof, output_dir):
+    """Save timing information and best parameters to files"""
+    os.makedirs(output_dir, exist_ok=True)
+    timestamp = time.strftime('%Y%m%d_%H%M%S')
+    
+    # Save timing info as CSV
+    timing_filename = f"timing_{model_type}_{dof}_{timestamp}.csv"
+    timing_filepath = os.path.join(output_dir, timing_filename)
+    
+    df = pd.DataFrame([timing_data])
+    df.to_csv(timing_filepath, index=False)
+    print(f"Timing info saved to {timing_filepath}")
+    
+    # Save best parameters as JSON
+    params_filename = f"best_params_{model_type}_{dof}_{timestamp}.json"
+    params_filepath = os.path.join(output_dir, params_filename)
+    
+    with open(params_filepath, 'w') as f:
+        json.dump(best_params, f, indent=2)
+    print(f"Best parameters saved to {params_filepath}")
+    
+    # Also save combined info for easy analysis
+    combined_data = timing_data.copy()
+    combined_data['best_params'] = best_params
+    combined_filename = f"combined_{model_type}_{dof}_{timestamp}.json"
+    combined_filepath = os.path.join(output_dir, combined_filename)
+    
+    with open(combined_filepath, 'w') as f:
+        json.dump(combined_data, f, indent=2, default=str)  # default=str handles non-serializable objects
+
+def scale_features(processed_data, method='standard', save_path=None, return_dataframe=True):
+    """
+    Scale features and return scaled data with proper structure
+    """
+    # Handle input data
+    if isinstance(processed_data, list):
+        all_data = pd.concat(processed_data, ignore_index=True)
+        was_list = True
+    else:
+        all_data = processed_data
+        was_list = False
+    
+    # Identify columns
+    label_cols = [col for col in all_data.columns if col.startswith('dof_')]
+    meta_cols = [col for col in all_data.columns if col in ['window_index', 'label', 'subject_id', 'session_id']]
+    feature_cols = [col for col in all_data.columns if col not in label_cols + meta_cols]
+    
+    X = all_data[feature_cols].values
+    feature_names = feature_cols  # Keep track of feature names
+    
+    # Choose and fit scaler
+    if method == 'standard':
+        scaler = StandardScaler()
+    elif method == 'robust':
+        scaler = RobustScaler()
+    elif method == 'minmax':
+        from sklearn.preprocessing import MinMaxScaler
+        scaler = MinMaxScaler()
+    else:
+        raise ValueError(f"Unknown scaling method: {method}")
+    
+    X_scaled = scaler.fit_transform(X)
+    
+    # Save scaler
+    if save_path:
+        os.makedirs(save_path, exist_ok=True)
+        scaler_filename = f"scaler_{method}.pkl"
+        scaler_filepath = os.path.join(save_path, scaler_filename)
+        joblib.dump(scaler, scaler_filepath)
+        
+        # Also save feature names for reference
+        feature_info = {
+            'feature_names': feature_cols,
+            'label_names': label_cols,
+            'meta_names': meta_cols,
+            'scaling_method': method
+        }
+        feature_info_path = os.path.join(save_path, f"feature_info_{method}.pkl")
+        joblib.dump(feature_info, feature_info_path)
+        print(f"Scaler and feature info saved to {save_path}")
+    
+    # Return appropriate format
+    if return_dataframe:
+        # Create new DataFrame with scaled features
+        scaled_df = all_data.copy()
+        scaled_df[feature_cols] = X_scaled
+        
+        if was_list:
+            # Return list of DataFrames if input was list
+            result = []
+            start_idx = 0
+            for df in processed_data:
+                end_idx = start_idx + len(df)
+                scaled_slice = scaled_df.iloc[start_idx:end_idx].reset_index(drop=True)
+                result.append(scaled_slice)
+                start_idx = end_idx
+            return scaler, result
+        else:
+            return scaler, scaled_df
+    else:
+        return scaler, X_scaled
 
 def main():
 
@@ -168,9 +320,19 @@ def main():
 
         # Save preprocessed data
         #save_features_to_disk(processed_data_list, PROCESSED_DATA_PATH)
+    
+    # TODO: Scale features and save scalers
+    # 4. Scale features
+    print("Scaling features...")
+    scaler, scaled_data_list = scale_features(
+        processed_data_list,
+        method='standard',  # Choose: 'standard', 'robust', or 'minmax'
+        save_path=SCALER_OUTPUT_DIR,
+        return_dataframe=True
+    )
 
-    # 4. Train-test-split (by subject or session)
-    all_data = pd.concat(processed_data_list, ignore_index=True)
+    # 5. Train-test-split (using scaled data)
+    all_data = pd.concat(scaled_data_list, ignore_index=True)
     
     # Separate features from labels
     label_cols = [col for col in all_data.columns if col.startswith('dof_')]
@@ -188,68 +350,126 @@ def main():
 
     # 5. Training models (loop for DoFs)
     trained_models = {}
-    for dof in DOF_LIST:
 
-        # 5.1. Select corresponding labels
-        print("\n")
-        print(f"Training model for {dof} ...")
-        # breakpoint()
-        y_dof_train = y_train[MAP_DOF_NAME_TO_ID[dof]] # labels corresponding to DoF
-        y_dof_test = y_test[MAP_DOF_NAME_TO_ID[dof]]
+    print("Training models for all DOFs in parallel...")
+    start_time = time.time()
+    results = Parallel(n_jobs=-1, verbose=10)(
+        delayed(train_dof_model)(dof, X_train, y_train, X_test, y_test)
+        for dof in DOF_LIST
+    )
 
-        if len(np.unique(y_dof_train))==1 or len(np.unique(y_dof_test))==1:
-            print("Single label -> no classification")
-            continue
+    # Process results
+    trained_models = {}
+    all_timing_data = {}
+    all_best_params = {}
 
-        # 5.2. Model
-        model = choose_model(MODEL_TYPE, ALL_HYPERPARAMS, RANDOM_STATE)
+    for dof, model, scores, best_params, timing_data in results:
+        if model is not None:
+            trained_models[dof] = model
+            all_timing_data[dof] = timing_data
+            all_best_params[dof] = best_params
+            
+            # Save individual model results
+            save_model(model, MODEL_TYPE, dof, MODEL_OUTPUT_DIR, scaler=None)
+            save_timing_and_params(timing_data, best_params, MODEL_TYPE, dof, TIMING_OUTPUT_DIR)
+
+    # Save summary across all DOFs
+    summary_data = {
+        'overall_timing': all_timing_data,
+        'all_best_params': all_best_params,
+        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+    }
+
+    summary_filename = f"summary_all_dofs_{MODEL_TYPE}_{time.strftime('%Y%m%d_%H%M%S')}.json"
+    summary_filepath = os.path.join(TIMING_OUTPUT_DIR, summary_filename)
+
+    with open(summary_filepath, 'w') as f:
+        json.dump(summary_data, f, indent=2, default=str)
+
+    print(f"Overall summary saved to {summary_filepath}")
+    end_time = time.time()
+    print(f"Overall training performed in {(end_time-start_time):.2f} seconds.")
+
+    # for dof in DOF_LIST:
+    #     # 5.1. Select corresponding labels
+    #     print("\n")
+    #     print(f"Training model for {dof} ...")
+    #     # breakpoint()
+    #     y_dof_train = y_train[MAP_DOF_NAME_TO_ID[dof]] # labels corresponding to DoF
+    #     y_dof_test = y_test[MAP_DOF_NAME_TO_ID[dof]]
+
+    #     if len(np.unique(y_dof_train))==1 or len(np.unique(y_dof_test))==1:
+    #         print("Single label -> no classification")
+    #         continue
+
+    #     # 5.2. Model
+    #     model = choose_model(MODEL_TYPE, ALL_HYPERPARAMS, RANDOM_STATE)
 
         
-        if HYPERPARAMETER_SEARCH:
-            # 5.3. Hyperparameter search
-            print(f"Hyperparameter search ...")
-            param_grid = ALL_PARAM_GRIDS.get(MODEL_TYPE, None)
-            kfold = KFold(n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE)
+    #     if HYPERPARAMETER_SEARCH:
+    #         # 5.3. Hyperparameter search
+    #         print(f"Hyperparameter search ...")
+    #         param_grid = ALL_PARAM_GRIDS.get(MODEL_TYPE, None)
+    #         kfold = KFold(n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE)
 
-            if NESTED_CV:
-                print(f"Nested CV ...")
-                scores = []
-                for i in range(NUM_TRIALS):
-                    clf = GridSearchCV(model, param_grid, cv=kfold)
-                    score = cross_val_score(clf, X=X_train, y=y_dof_train, cv=kfold)
-                    scores[i] = score.mean()
-                    best_params = clf.best_params_
-                plot_cv_scores(scores)
-            else:
-                print(f"CV ...")
-                clf = GridSearchCV(
-                    estimator=model,
-                    param_grid=param_grid,
-                    cv=kfold,
-                )
-                clf.fit(X_train, y_dof_train)
-                best_params = clf.best_params_
-                best_score = clf.best_score_
-                final_model = clf.best_estimator_
-                save_best_params(best_params, MODEL_TYPE, dof, BEST_PARAMS_OUTPUT_DIR)
-        else:
-            # 5.4. Train model with best params
-            print(f"No hyperparameter search, direct training ...")
-            final_model = model
-            best_params = final_model.get_params()
-            print(f"best params: {best_params}")
-            final_model.fit(X_train, y_dof_train)
+    #         if NESTED_CV:
+    #             print(f"Nested CV ...")
+    #             scores = []
+    #             # print("Without parallelization, this may take a while...")
+    #             # start_time = time.time()
+    #             # for i in range(NUM_TRIALS):
+    #             #     clf = GridSearchCV(model, param_grid, cv=kfold)
+    #             #     score = cross_val_score(clf, X=X_train, y=y_dof_train, cv=kfold)
+    #             #     scores[i] = score.mean()
+    #             #     best_params = clf.best_params_
+    #             #     print(f"Trial {i+1}/{NUM_TRIALS}, Best Params: {best_params}, Score: {score.mean():.4f}")
+    #             # end_time = time.time()
+    #             # print(f"Hyperparameter search (without parallelization)complete in {end_time - start_time:.2f} seconds.")
+    #             # plot_cv_scores(scores)
 
-        # 5.5. Evaluate
-        y_pred = final_model.predict(X_test)
-        test_scores = compute_scores(y_dof_test, y_pred)
+    #             scores = []
+    #             start_time = time.time()
+    #             print("With parallelization ...")
+    #             for i in range(NUM_TRIALS):
+    #                 clf = GridSearchCV(model, param_grid, cv=kfold, n_jobs=-1)
+    #                 score = cross_val_score(clf, X=X_train, y=y_dof_train, cv=kfold)
+    #                 scores[i] = score.mean()
+    #                 best_params = clf.best_params_
+    #                 print(f"Trial {i+1}/{NUM_TRIALS}, Best Params: {best_params}, Score: {score.mean():.4f}")
+    #             end_time = time.time()
+    #             print(f"Hyperparameter search (without parallelization)complete in {end_time - start_time:.2f} seconds.")
+    #             plot_cv_scores(scores)
 
-        save_plot_path = os.path.join(FIG_OUTPUT_DIR, f"{MODEL_TYPE}/plot_labels_{dof}.png")
-        # plot_labels(y_dof_test, y_pred, show=False, save_path=save_plot_path)
+    #         else:
+    #             print(f"CV ...")
+    #             clf = GridSearchCV(
+    #                 estimator=model,
+    #                 param_grid=param_grid,
+    #                 cv=kfold,
+    #             )
+    #             clf.fit(X_train, y_dof_train)
+    #             best_params = clf.best_params_
+    #             best_score = clf.best_score_
+    #             final_model = clf.best_estimator_
+    #             save_best_params(best_params, MODEL_TYPE, dof, BEST_PARAMS_OUTPUT_DIR)
+    #     else:
+    #         # 5.4. Train model with best params
+    #         print(f"No hyperparameter search, direct training ...")
+    #         final_model = model
+    #         best_params = final_model.get_params()
+    #         print(f"best params: {best_params}")
+    #         final_model.fit(X_train, y_dof_train)
+    # TODO: train time, inference time --> load a model and input a random window
+    #     # 5.5. Evaluate
+    #     y_pred = final_model.predict(X_test)
+    #     test_scores = compute_scores(y_dof_test, y_pred)
 
-        # 5.6. Save generic model
-        save_model(final_model, MODEL_TYPE, dof, MODEL_OUTPUT_DIR, scaler=None)
-        trained_models[dof] = final_model
+    #     save_plot_path = os.path.join(FIG_OUTPUT_DIR, f"{MODEL_TYPE}/plot_labels_{dof}.png")
+    #     # plot_labels(y_dof_test, y_pred, show=False, save_path=save_plot_path)
+
+    #     # 5.6. Save generic model
+    #     save_model(final_model, MODEL_TYPE, dof, MODEL_OUTPUT_DIR, scaler=None)
+    #     trained_models[dof] = final_model
 
 
 if __name__ == "__main__":

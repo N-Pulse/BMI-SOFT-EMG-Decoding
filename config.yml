@@ -75,9 +75,9 @@ modeling:
   # Percentage of data to hold out for the test set
   test_size: 0.2
 
-  hyperparam_search: False
+  hyperparam_search: True
 
-  nested_cv: False
+  nested_cv: True
 
   num_trials: 10
 
