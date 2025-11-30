@@ -31,7 +31,7 @@ modeling:
     - "pinky_flex_ext"
 
   # Model to use: "LDA" or "RandomForest" or "DecisionTree" or "GaussianNB" or "SVM"
-  model_type: "RandomForest"
+  model_type: "DecisionTree"
 
   hyperparams:
     LDA:
