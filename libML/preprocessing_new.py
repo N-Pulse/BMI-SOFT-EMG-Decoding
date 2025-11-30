@@ -86,7 +86,7 @@ def segment_aux_windows_new(data, labels, window_ms=200, step_ms=100, sampling_r
     
     return df
 
-def notch_filter(df, fs=1000, freq=50.0, q=30.0):
+def notch_filter(df, fs=1000, freq=50.0, q=30.0, single=False):
     """Remove power line interference at 50 Hz (or 60 Hz for US)"""
     b, a = signal.iirnotch(freq, q, fs)
     
@@ -95,13 +95,17 @@ def notch_filter(df, fs=1000, freq=50.0, q=30.0):
         # Skip non-time-series columns
         if col == 'window_index' or col == 'label':
             continue
-        # Apply filter only to columns that contain arrays
-        filtered_df[col] = df[col].apply(lambda x: signal.filtfilt(b, a, x) if isinstance(x, (list, np.ndarray)) and len(x) > 1 else x)
+
+        if not single:
+            # Apply filter only to columns that contain arrays
+            filtered_df[col] = df[col].apply(lambda x: signal.filtfilt(b, a, x) if isinstance(x, (list, np.ndarray)) and len(x) > 1 else x)
+        else:
+            filtered_df[col] = signal.filtfilt(b, a, df[col])
     
     return filtered_df
 
 
-def passband_filter(df, fs=1000, lowcut=20.0, highcut=300.0, order=4):
+def passband_filter(df, fs=1000, lowcut=20.0, highcut=300.0, order=4, single=False):
     """Bandpass filter for EMG signals (20-450 Hz)"""
     nyq = 0.5 * fs
     low = lowcut / nyq
@@ -113,8 +117,12 @@ def passband_filter(df, fs=1000, lowcut=20.0, highcut=300.0, order=4):
         # Skip non-time-series columns
         if col == 'window_index' or col == 'label':
             continue
-        # Apply filter only to columns that contain arrays
-        filtered_df[col] = df[col].apply(lambda x: signal.filtfilt(b, a, x) if isinstance(x, (list, np.ndarray)) and len(x) > 1 else x)
+
+        if not single:
+            # Apply filter only to columns that contain arrays
+            filtered_df[col] = df[col].apply(lambda x: signal.filtfilt(b, a, x) if isinstance(x, (list, np.ndarray)) and len(x) > 1 else x)
+        else:
+            filtered_df[col] = signal.filtfilt(b, a, df[col])
     
     return filtered_df
 
