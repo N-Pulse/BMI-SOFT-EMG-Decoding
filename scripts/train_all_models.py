@@ -15,7 +15,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from libML.data_load_and_label_for_training import load_emg_data
 from libML.models import choose_model
-from libML.evaluation import compute_scores, plot_cv_scores, plot_labels
+from libML.evaluation import compute_scores, plot_cv_scores, plot_labels, evaluate_overall_system_performance_detailed
 from libML.export import save_best_params, save_model
 from libML.preprocessing_new import segment_aux_windows_new, notch_filter, passband_filter
 from libML.feature_engineering import extract_window_features
@@ -57,7 +57,8 @@ MODEL_TYPE = MODELING.get('model_type', 'LDA')
 ALL_HYPERPARAMS = MODELING.get('hyperparams', {})
 
 RANDOM_STATE = MODELING.get('random_state', 42)
-TEST_SIZE = MODELING.get('test_size', 0.2)
+TEST_SIZE = MODELING.get('test_size', 0.15)
+VAL_SIZE = MODELING.get('val_size', 0.15)
 
 # Grid search
 HYPERPARAMETER_SEARCH = MODELING.get('hyperparam_search', False)
@@ -342,10 +343,24 @@ def main():
     y = {dof: all_data[dof].values for dof in label_cols}
     
     # Simple random split
-    X_train, X_test = train_test_split(X, test_size=TEST_SIZE, random_state=RANDOM_STATE)
-    y_train = {dof: train_test_split(y[dof], test_size=TEST_SIZE, random_state=RANDOM_STATE)[0] for dof in label_cols}
-    y_test = {dof: train_test_split(y[dof], test_size=TEST_SIZE, random_state=RANDOM_STATE)[1] for dof in label_cols}
+    # X_train, X_test = train_test_split(X, test_size=TEST_SIZE, random_state=RANDOM_STATE)
+    # y_train = {dof: train_test_split(y[dof], test_size=TEST_SIZE, random_state=RANDOM_STATE)[0] for dof in label_cols}
+    # y_test = {dof: train_test_split(y[dof], test_size=TEST_SIZE, random_state=RANDOM_STATE)[1] for dof in label_cols}
 
+    indices = np.arange(len(X))
+    train_val_idx, test_idx = train_test_split(indices, test_size=TEST_SIZE, random_state=RANDOM_STATE)
+    train_idx, val_idx = train_test_split(train_val_idx, test_size=VAL_SIZE, random_state=RANDOM_STATE)
+
+    # Create splits
+    X_train, X_val, X_test = X[train_idx], X[val_idx], X[test_idx]
+    y_train, y_val, y_test = {}, {}, {}
+
+    for dof in label_cols:
+        y_train[dof] = y[dof][train_idx]
+        y_val[dof] = y[dof][val_idx]
+        y_test[dof] = y[dof][test_idx]
+
+    print(f"Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
     #breakpoint()
 
     # 5. Training models (loop for DoFs)
@@ -354,7 +369,7 @@ def main():
     print("Training models for all DOFs in parallel...")
     start_time = time.time()
     results = Parallel(n_jobs=-1, verbose=10)(
-        delayed(train_dof_model)(dof, X_train, y_train, X_test, y_test)
+        delayed(train_dof_model)(dof, X_train, y_train, X_val, y_val)
         for dof in DOF_LIST
     )
 
@@ -373,10 +388,66 @@ def main():
             save_model(model, MODEL_TYPE, dof, MODEL_OUTPUT_DIR, scaler=None)
             save_timing_and_params(timing_data, best_params, MODEL_TYPE, dof, TIMING_OUTPUT_DIR)
 
-    # Save summary across all DOFs
+    # Test performance of model on the test set
+    print("\nTesting all models on test set...")
+    all_test_scores = {}
+
+    for dof in DOF_LIST:
+        if dof in trained_models:
+            model = trained_models[dof]
+            y_test_dof = y_test[MAP_DOF_NAME_TO_ID[dof]]
+            
+            start_time = time.time()
+            y_pred_test = model.predict(X_test)
+            inference_time = time.time() - start_time
+            # Probability of prediciting each class
+            y_pred_proba_test = getattr(model, "predict_proba", lambda x: None)(X_test) 
+            
+            test_scores = compute_scores(y_test_dof, y_pred_test)
+            test_time = time.time() - start_time
+            
+            all_test_scores[dof] = test_scores
+            all_timing_data[dof]['test_time'] = test_time  # Add to timing data
+            all_timing_data[dof]['avg_inference_time'] = inference_time/len(X_test)  # Per-sample inference time
+
+            print(f"{dof} - Test scores: {test_scores}")
+
+    # Evaluate performance with combined DOFs
+    print("\n" + "="*60)
+    print("OVERALL SYSTEM PERFORMANCE EVALUATION")
+    print("="*60)
+
+    # Evaluate overall system performance
+    overall_system_scores = evaluate_overall_system_performance_detailed(
+        trained_models, X_test, y_test, DOF_LIST, MAP_DOF_NAME_TO_ID
+    )
+
+    # Print detailed results
+    print(f"\nOverall System Accuracy: {overall_system_scores.get('overall_accuracy', 0):.4f} "
+        f"({overall_system_scores.get('n_correct_samples', 0)}/{overall_system_scores.get('n_total_samples', 0)} samples)")
+
+    print(f"\nError Breakdown:")
+    for dof, errors in overall_system_scores.get('errors_per_dof', {}).items():
+        ratio = overall_system_scores.get('error_ratio_per_dof', {}).get(dof, 0)
+        print(f"  {dof:15}: {errors:3d} errors ({ratio:.2%} of total errors)")
+
+    if 'most_problematic_dof' in overall_system_scores:
+        print(f"\nMost problematic DOF: {overall_system_scores['most_problematic_dof']} "
+            f"({overall_system_scores['max_errors']} errors)")
+
+    print("=" * 60)
+
+    # Save comprehensive results
     summary_data = {
         'overall_timing': all_timing_data,
         'all_best_params': all_best_params,
+        'all_test_scores': all_test_scores,
+        'overall_system_scores': overall_system_scores,
+        'test_set_info': {
+            'n_samples': len(X_test),
+            'feature_shape': X_test.shape,
+            'test_split_ratio': TEST_SIZE
+        },
         'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
     }
 
@@ -389,87 +460,6 @@ def main():
     print(f"Overall summary saved to {summary_filepath}")
     end_time = time.time()
     print(f"Overall training performed in {(end_time-start_time):.2f} seconds.")
-
-    # for dof in DOF_LIST:
-    #     # 5.1. Select corresponding labels
-    #     print("\n")
-    #     print(f"Training model for {dof} ...")
-    #     # breakpoint()
-    #     y_dof_train = y_train[MAP_DOF_NAME_TO_ID[dof]] # labels corresponding to DoF
-    #     y_dof_test = y_test[MAP_DOF_NAME_TO_ID[dof]]
-
-    #     if len(np.unique(y_dof_train))==1 or len(np.unique(y_dof_test))==1:
-    #         print("Single label -> no classification")
-    #         continue
-
-    #     # 5.2. Model
-    #     model = choose_model(MODEL_TYPE, ALL_HYPERPARAMS, RANDOM_STATE)
-
-        
-    #     if HYPERPARAMETER_SEARCH:
-    #         # 5.3. Hyperparameter search
-    #         print(f"Hyperparameter search ...")
-    #         param_grid = ALL_PARAM_GRIDS.get(MODEL_TYPE, None)
-    #         kfold = KFold(n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE)
-
-    #         if NESTED_CV:
-    #             print(f"Nested CV ...")
-    #             scores = []
-    #             # print("Without parallelization, this may take a while...")
-    #             # start_time = time.time()
-    #             # for i in range(NUM_TRIALS):
-    #             #     clf = GridSearchCV(model, param_grid, cv=kfold)
-    #             #     score = cross_val_score(clf, X=X_train, y=y_dof_train, cv=kfold)
-    #             #     scores[i] = score.mean()
-    #             #     best_params = clf.best_params_
-    #             #     print(f"Trial {i+1}/{NUM_TRIALS}, Best Params: {best_params}, Score: {score.mean():.4f}")
-    #             # end_time = time.time()
-    #             # print(f"Hyperparameter search (without parallelization)complete in {end_time - start_time:.2f} seconds.")
-    #             # plot_cv_scores(scores)
-
-    #             scores = []
-    #             start_time = time.time()
-    #             print("With parallelization ...")
-    #             for i in range(NUM_TRIALS):
-    #                 clf = GridSearchCV(model, param_grid, cv=kfold, n_jobs=-1)
-    #                 score = cross_val_score(clf, X=X_train, y=y_dof_train, cv=kfold)
-    #                 scores[i] = score.mean()
-    #                 best_params = clf.best_params_
-    #                 print(f"Trial {i+1}/{NUM_TRIALS}, Best Params: {best_params}, Score: {score.mean():.4f}")
-    #             end_time = time.time()
-    #             print(f"Hyperparameter search (without parallelization)complete in {end_time - start_time:.2f} seconds.")
-    #             plot_cv_scores(scores)
-
-    #         else:
-    #             print(f"CV ...")
-    #             clf = GridSearchCV(
-    #                 estimator=model,
-    #                 param_grid=param_grid,
-    #                 cv=kfold,
-    #             )
-    #             clf.fit(X_train, y_dof_train)
-    #             best_params = clf.best_params_
-    #             best_score = clf.best_score_
-    #             final_model = clf.best_estimator_
-    #             save_best_params(best_params, MODEL_TYPE, dof, BEST_PARAMS_OUTPUT_DIR)
-    #     else:
-    #         # 5.4. Train model with best params
-    #         print(f"No hyperparameter search, direct training ...")
-    #         final_model = model
-    #         best_params = final_model.get_params()
-    #         print(f"best params: {best_params}")
-    #         final_model.fit(X_train, y_dof_train)
-    # TODO: train time, inference time --> load a model and input a random window
-    #     # 5.5. Evaluate
-    #     y_pred = final_model.predict(X_test)
-    #     test_scores = compute_scores(y_dof_test, y_pred)
-
-    #     save_plot_path = os.path.join(FIG_OUTPUT_DIR, f"{MODEL_TYPE}/plot_labels_{dof}.png")
-    #     # plot_labels(y_dof_test, y_pred, show=False, save_path=save_plot_path)
-
-    #     # 5.6. Save generic model
-    #     save_model(final_model, MODEL_TYPE, dof, MODEL_OUTPUT_DIR, scaler=None)
-    #     trained_models[dof] = final_model
 
 
 if __name__ == "__main__":

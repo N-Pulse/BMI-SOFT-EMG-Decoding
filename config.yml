@@ -30,7 +30,7 @@ modeling:
     - "ring_flex_ext"
     - "pinky_flex_ext"
 
-  # Model to use: "LDA" or "LinearSVC"
+  # Model to use: "LDA" or "RandomForest" or "DecisionTree" or "GaussianNB" or "SVM"
   model_type: "RandomForest"
 
   hyperparams:
@@ -38,9 +38,11 @@ modeling:
       solver: "lsqr"
       shrinkage: "auto"
     SVM:
+      loss: "squared_hinge"
       dual: "auto"
       max_iter: 10000
       C: 1.0
+      random_state: 42
     GaussianNB: {}
     DecisionTree:
       max_depth: 10
@@ -55,11 +57,11 @@ modeling:
       solver: ["lsqr", "eigen"]
       shrinkage: ["auto"]
     SVM:
+      # multi_class: ["ovr", "crammer_singer"]
       loss: ["hinge", "squared_hinge"]
       dual: ["auto"]
-      max_iter: [10000, 100000]
+      max_iter: [10000, 50000]
       C: [0.01, 0.1, 1.0]
-      multi_class: ["ovr", "crammer_singer"]
     GaussianNB: {}
     DecisionTree:
       max_depth: [10]
@@ -73,7 +75,8 @@ modeling:
   random_state: 42
   
   # Percentage of data to hold out for the test set
-  test_size: 0.2
+  test_size: 0.15
+  val_size: 0.15
 
   hyperparam_search: True
 
