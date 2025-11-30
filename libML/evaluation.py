@@ -181,29 +181,31 @@ def plot_simple_timeline(y_test, y_pred, title="Prediction Timeline", save_plot=
     plt.tight_layout()
     plt.show()
 
-def compute_scores(y_test, y_pred, show=True):
+def compute_scores(y_test, y_pred, show=True, show_per_class=True):
     accuracy = accuracy_score(y_test, y_pred)
     
-    # Get unique classes
-    classes = sorted(set(y_test) | set(y_pred))
-    
-    # Compute per-class metrics
-    precision_dict = {}
-    recall_dict = {}
-    f1_dict = {}
-    
-    for cls in classes:
-        precision_dict[cls] = precision_score(y_test, y_pred, labels=[cls], average=None, zero_division=0)[0]
-        recall_dict[cls] = recall_score(y_test, y_pred, labels=[cls], average=None, zero_division=0)[0]
-        f1_dict[cls] = f1_score(y_test, y_pred, labels=[cls], average=None, zero_division=0)[0]
+    # Main metrics
+    precision = precision_score(y_test, y_pred, average='weighted', zero_division=0)
+    recall = recall_score(y_test, y_pred, average='weighted', zero_division=0)
+    f1 = f1_score(y_test, y_pred, average='weighted', zero_division=0)
     
     if show:
         print(f"Accuracy: {100*accuracy:.2f} %")
-        print(f"Precision per class: {precision_dict}")
-        print(f"Recall per class: {recall_dict}")
-        print(f"F1 Score per class: {f1_dict}")
+        print(f"Precision: {100*precision:.2f} %")
+        print(f"Recall: {100*recall:.2f} %")
+        print(f"F1 Score: {100*f1:.2f} %")
+        
+        # Optional per-class display
+        if show_per_class:
+            classes = sorted(set(y_test) | set(y_pred))
+            print("\nPer-class metrics:")
+            for cls in classes:
+                prec_cls = precision_score(y_test, y_pred, labels=[cls], average=None, zero_division=0)[0]
+                rec_cls = recall_score(y_test, y_pred, labels=[cls], average=None, zero_division=0)[0]
+                f1_cls = f1_score(y_test, y_pred, labels=[cls], average=None, zero_division=0)[0]
+                print(f"  Class {cls}: Precision={100*prec_cls:.1f}%, Recall={100*rec_cls:.1f}%, F1={100*f1_cls:.1f}%")
 
-    return accuracy, precision_dict, recall_dict, f1_dict
+    return accuracy, precision, recall, f1
 
 def plot_cv_scores(scores):
     plt.figure()

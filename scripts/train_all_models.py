@@ -406,7 +406,12 @@ def main():
             test_scores = compute_scores(y_test_dof, y_pred_test)
             test_time = time.time() - start_time
             
-            all_test_scores[dof] = test_scores
+            all_test_scores[dof] = {}
+            all_test_scores[dof]["Accuracy"] = test_scores[0]
+            all_test_scores[dof]["Precision"] = test_scores[1]
+            all_test_scores[dof]["Recall"] = test_scores[2]
+            all_test_scores[dof]["F1"] = test_scores[2]
+
             all_timing_data[dof]['test_time'] = test_time  # Add to timing data
             all_timing_data[dof]['avg_inference_time'] = inference_time/len(X_test)  # Per-sample inference time
 
@@ -460,7 +465,6 @@ def main():
     print(f"Overall summary saved to {summary_filepath}")
     end_time = time.time()
     print(f"Overall training performed in {(end_time-start_time):.2f} seconds.")
-
 
 if __name__ == "__main__":
     main()
