@@ -59,7 +59,7 @@ def segment_aux_windows_new(data, labels, window_ms=200, step_ms=100, sampling_r
             # Append data for each channel
             for ch_idx in range(data.shape[1]):
                 windowed_data[ch_idx].append(data[start:end, ch_idx])
-                
+
             for dof in labels.keys():
                 if dof != "original_labels":  # Skip original_labels if it's not a DOF
                     unique_dof_labels = np.unique(labels[dof][start:end])

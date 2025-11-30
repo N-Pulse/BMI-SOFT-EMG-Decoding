@@ -9,7 +9,7 @@ The decoding of the trigger labels relies on the trigger system protocol as of t
 
 import numpy as np
 
-def map_triggers_to_labels(emg_channels, trigger_labels, trigger_version='v2'):
+def map_triggers_to_labels(emg_channels, trigger_labels, trigger_version= 'v1'):
     """
     Map trigger signals to action labels.
     It also deletes the data that was sampled before the first trigger.
@@ -34,7 +34,7 @@ def map_triggers_to_labels(emg_channels, trigger_labels, trigger_version='v2'):
     # Create a copy of the time_series array to avoid modifying the original
     if trigger_version == 'v1':
         mapped_trigger_series = map_protocol_to_label_v1(trigger_labels["time_series"].copy())
-    if trigger_version == 'v2':
+    elif trigger_version == 'v2':
         mapped_trigger_series = map_protocol_to_label_v2(trigger_labels["time_series"].copy())
     else:
         raise ValueError(f"Unknown trigger version '{trigger_version}'.")
