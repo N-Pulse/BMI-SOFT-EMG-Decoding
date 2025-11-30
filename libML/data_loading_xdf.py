@@ -104,3 +104,18 @@ def get_emg_channels(streams):
     }
 
     return emg_channels
+
+def load_csv_file(data_path):
+    data_df = pd.read_csv(data_path, delimiter=',', skiprows=4)
+    # cols = data_df.iloc[0]
+    # print(cols)
+    # data_df.drop(index=0, inplace=True)
+    # data_df.columns = cols
+    print(data_df)
+    return data_df
+
+def load_xdf_file(data_path):
+    streams, header = pyxdf.load_xdf(data_path)
+    emg_channels = get_emg_channels(streams)
+    return emg_channels
+    
