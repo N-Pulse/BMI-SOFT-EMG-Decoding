@@ -2,16 +2,29 @@ import os
 from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score
 from matplotlib import pyplot as plt
 
-def compute_scores(y_test, y_pred):
+def compute_scores(y_test, y_pred, show=True):
     accuracy = accuracy_score(y_test, y_pred)
-    # precision = precision_score(y_test, y_pred)
-    # recall = recall_score(y_test, y_pred)
-    #f1 = f1_score(y_test, y_pred)
-    # print(f"Accuracy: {accuracy}, Precision: {precision}, Recall: {recall}, F1-Score: {f1}")
-    print(f"Accuracy: {100*accuracy:.2f} %")
-    #print(f"F1 Score: {100*f1:.2f} %")
+    
+    # Get unique classes
+    classes = sorted(set(y_test) | set(y_pred))
+    
+    # Compute per-class metrics
+    precision_dict = {}
+    recall_dict = {}
+    f1_dict = {}
+    
+    for cls in classes:
+        precision_dict[cls] = precision_score(y_test, y_pred, labels=[cls], average=None, zero_division=0)[0]
+        recall_dict[cls] = recall_score(y_test, y_pred, labels=[cls], average=None, zero_division=0)[0]
+        f1_dict[cls] = f1_score(y_test, y_pred, labels=[cls], average=None, zero_division=0)[0]
+    
+    if show:
+        print(f"Accuracy: {100*accuracy:.2f} %")
+        print(f"Precision per class: {precision_dict}")
+        print(f"Recall per class: {recall_dict}")
+        print(f"F1 Score per class: {f1_dict}")
 
-    return accuracy#, precision, recall, f1
+    return accuracy, precision_dict, recall_dict, f1_dict
 
 def plot_cv_scores(scores):
     plt.figure()
