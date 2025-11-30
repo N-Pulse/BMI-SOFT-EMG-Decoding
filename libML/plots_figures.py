@@ -32,3 +32,27 @@ def plot_stacked_channels(df, time_col='Time', title='Channel Data'):
     
     plt.tight_layout()
     plt.show()
+
+def plot_true_vs_predicted(y_true, y_pred, title='True vs Predicted Labels'):
+    """
+    Plots true labels vs predicted labels as a function of sample index.
+    
+    Args:
+        y_true: array of true labels
+        y_pred: array of predicted labels
+        title: plot title
+    """
+    fig, ax = plt.subplots(figsize=(12, 4))
+    
+    ax.plot(y_true, label='True Labels', alpha=0.7, linewidth=1.5)
+    ax.plot(y_pred, label='Predicted Labels', alpha=0.7, linewidth=1.5)
+    
+    ax.set_xlabel('Sample Index')
+    ax.set_ylabel('Class Label')
+    ax.set_title(title)
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+
