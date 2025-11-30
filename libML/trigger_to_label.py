@@ -9,7 +9,7 @@ The decoding of the trigger labels relies on the trigger system protocol as of t
 
 import numpy as np
 
-def map_triggers_to_labels(emg_channels, trigger_labels):
+def map_triggers_to_labels(emg_channels, trigger_labels, trigger_version='v2'):
     """
     Map trigger signals to action labels.
     It also deletes the data that was sampled before the first trigger.
@@ -32,7 +32,12 @@ def map_triggers_to_labels(emg_channels, trigger_labels):
 
     # Second step: Define Map that transforms triggers to labels
     # Create a copy of the time_series array to avoid modifying the original
-    mapped_trigger_series = map_protocol_to_label(trigger_labels["time_series"].copy())
+    if trigger_version == 'v1':
+        mapped_trigger_series = map_protocol_to_label_v1(trigger_labels["time_series"].copy())
+    if trigger_version == 'v2':
+        mapped_trigger_series = map_protocol_to_label_v2(trigger_labels["time_series"].copy())
+    else:
+        raise ValueError(f"Unknown trigger version '{trigger_version}'.")
     
     # Create a new dictionary with mapped labels but keep the original structure
     mapped_trigger_labels = {
@@ -122,7 +127,8 @@ def extend_labels(emg_channels, trigger_labels):
 
     return emg_channels
 
-def map_protocol_to_label(trigger_labels):
+# ----- Mapping for the first protocol version (v1) 12.11.2025 -----
+def map_protocol_to_label_v1(trigger_labels):
     """
     Dummy version : Not taking into account initial hand state, only final state of the action
 
@@ -274,6 +280,170 @@ def map_protocol_to_label(trigger_labels):
             if movement_label in [1, 3]:  # low
                 digit = 1
             elif movement_label in [2, 4]:  # high
+                digit = 3
+            elif movement_label in []:  # normal
+                digit = 2
+            else:  # not specified
+                digit = 0
+            new_label += digit * (10 ** 9)
+
+        new_labels[i] = new_label
+    
+    return new_labels
+
+# ----- Mapping for the new protocol version (v2) 21.11.2025 -----
+def map_protocol_to_label_v2(trigger_labels): 
+    """
+    Dummy version : Not taking into account initial hand state, only final state of the action
+
+    For each protocol movement, label 8 degrees of freedom :
+        1.  Thumb flexed/rest/extended  -->  0/1/2
+        2.  Index flexed/rest/extended  -->  0/1/2
+        3.  Middle flexed/rest/extended -->  0/1/2
+        4.  Ring flexed/rest/extended   -->  0/1/2
+        5.  Little flexed/rest/extended -->  0/1/2
+        6.  Supination  Palm facing: Up/Side/Down  -->  0/1/2
+        7.  Wrist angle Palm facing down then: Up(-90)/Straight(0)/Down(90)  -->  0/1/2
+        8.  Thumb Abduction --> extended dorsal / rest / extended palmar --> 0/1/2
+        9.  Strength --> not specified / low / medium / high --> 0/1/2/3
+        10. Speed --> not specified / low / medium / high --> 0/1/2/3
+
+    Label is encoded in a 10-digit value (int)
+    Label = -1 is for non interesting data
+
+    """
+    # Convert to numpy array with safe dtype first
+    if not isinstance(trigger_labels, np.ndarray):
+        trigger_labels = np.array(trigger_labels, dtype=np.int64)
+    else:
+        trigger_labels = trigger_labels.astype(np.int64)
+    
+    new_labels = np.full_like(trigger_labels, -1, dtype=np.int64)
+    
+    for i in range(len(trigger_labels)):
+        label = trigger_labels[i]
+
+        # Special codes
+        if label == 9701 or label == 9702:
+            if i != 0:
+                new_labels[i] = -1  # or new_labels[i-1] if you want to carry forward
+            else:  # in case we start the recording in resting state
+                new_labels[i] = -1
+            continue
+        if label in [8888, 9999, 8899]:
+            new_labels[i] = -1
+            continue
+
+        # Get codes
+        phase_label = label // 10000
+        arm_label = (label - phase_label * 10000) // 1000  # don't care actually
+        baseline_label = (label - phase_label * 10000 - arm_label * 1000) // 100
+        movement_label = label - phase_label * 10000 - arm_label * 1000 - baseline_label * 100
+        
+        new_label = 0
+
+        # No movements
+        if phase_label not in [7, 9]:  # move and return
+            new_labels[i] = -1  # not interesting for training
+            continue
+
+        # Disregarded movements
+        if movement_label in []:
+            new_labels[i] = -1
+            continue
+
+        # Movements
+        if phase_label in [7, 9]:
+            # Use proper base-10 encoding instead of floating point exponents
+            # Each digit gets its own place value (10^0, 10^1, 10^2, etc.)
+            
+            # Thumb flex/rest/ext --> 0/1/2 (1st digit)
+            if movement_label in [2, 3, 6, 11, 10]:  # flexed
+                digit = 0
+            elif movement_label in [5, 4, 8, 9, 12]:  # rest
+                digit = 1
+            else:  # movement_label in [1, 2, 7, 27] - extended
+                digit = 2
+            new_label += digit * (10 ** 0)
+
+            # Index flex/rest/ext --> 0/1/2 (2nd digit)
+            if movement_label in [2, 3, 11, 10]:  # flexed
+                digit = 0
+            elif movement_label in [7, 6, 5, 4, 8, 9, 12]:  # rest
+                digit = 1
+            else:  # movement_label in [1, 2] - extended
+                digit = 2
+            new_label += digit * (10 ** 1)
+
+            # Middle flex/rest/ext --> 0/1/2 (3rd digit)
+            if movement_label in [2, 3, 11, 10]:  # flexed
+                digit = 0
+            elif movement_label in [7, 6, 5, 4, 8, 9, 12]:  # rest
+                digit = 1
+            else:  # movement_label in [1, 2, 25] - extended
+                digit = 2
+            new_label += digit * (10 ** 2)
+
+            # Ring flex/rest/ext --> 0/1/2 (4th digit)
+            if movement_label in [2, 3, 11, 10]:  # flexed
+                digit = 0
+            elif movement_label in [7, 6, 5, 4, 8, 9, 12]:  # rest
+                digit = 1
+            else:  # movement_label in [1, 2, 24] - extended
+                digit = 2
+            new_label += digit * (10 ** 3)
+
+            # Pinky flex/rest/ext --> 0/1/2 (5th digit)
+            if movement_label in [2, 3, 11, 10]:  # flexed
+                digit = 0
+            elif movement_label in [7, 6, 5, 4, 8, 9, 12]:  # rest
+                digit = 1
+            else:  # movement_label in [1, 2] - extended
+                digit = 2
+            new_label += digit * (10 ** 4)
+
+            # Supination codes --> 0/1/2 (6th digit)
+            if baseline_label == 1:  # palm/fist up
+                digit = 0
+            elif baseline_label == 2:  # palm/fist side
+                digit = 1
+            else:  # baseline_label == 3 - palm/fist down
+                digit = 2
+            new_label += digit * (10 ** 5)
+
+            # Wrist codes (7th digit)
+            if movement_label in [8, 9]:
+                digit = 0  # Up(-90)
+            elif movement_label in [5, 4]:
+                digit = 2  # Down(90)
+            else:  # Straight(0)
+                digit = 1
+            new_label += digit * (10 ** 6)
+
+            # Thumb abduction (8th digit)
+            if movement_label in [1, 7]:  # dorsal
+                digit = 0
+            elif movement_label in [5, 4, 8, 9]:  # rest
+                digit = 1
+            else:  # movement_label in [2, 3, 6, 11, 10, 12] - palmar
+                digit = 2
+            new_label += digit * (10 ** 7)
+
+            # Strength (9th digit)
+            if movement_label in [5, 4, 8]:  # normal
+                digit = 2
+            elif movement_label in [3, 5, 9]:  # high
+                digit = 3
+            elif movement_label in []:  # low
+                digit = 1
+            else:  # not specified
+                digit = 0
+            new_label += digit * (10 ** 8)
+
+            # Speed (10th digit)
+            if movement_label in [1, 2]:  # low
+                digit = 1
+            elif movement_label in []:  # high
                 digit = 3
             elif movement_label in []:  # normal
                 digit = 2
