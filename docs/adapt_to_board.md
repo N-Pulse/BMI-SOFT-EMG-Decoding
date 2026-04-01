@@ -1,32 +1,38 @@
 # Adapting the Model to an Embedded System - Research & Assessment
 
-**Project:** N-pulse Prosthetic arm control using Machine Learning on EMG (and EEG) signals  
+**Project:** N-pulse Prosthetic arm control using Machine Learning on EMG signals  
 **Goal:** Prepare the integration pipeline to deploy an ML model on an embedded system
 
 ---
 
 ## 1. Context & Problem Statement
 
-The N-pulse project aims to control a prosthetic arm in real time by recognizing hand gestures from electromyography (EMG) signals and EEG signals. We need to prepare the embedded integration pipeline for future deployment once the model is ready. In this work, we will focus on EMG signals.
+The n-pulse project aims to control a prosthetic arm in real time by recognizing hand gestures from electromyography (EMG) signals and EEG signals. We need to prepare the embedded integration pipeline for future deployment once the model is ready. In this work, we will focus on EMG signals.
 
-The core challenge is to run ML inference directly on a microcontroller, under strict constraints of memory, compute, and latency. By ML inference, we mean the process by which the trained model receives new data and produces a prediction: the microcontroller receives a short window of EMG samples, feeds them through the model, and outputs a gesture class (e.g. open hand, pinch, fist) in real time, entirely on-device, with no connection to a PC or cloud server.
+The core challenge is to run ML inference directly on a microcontroller, under strict constraints of memory, compute, and latency. By ML inference, we mean the process by which the trained model receives new data and produces a prediction: the microcontroller receives a short window of EMG samples, feeds them through the model, and outputs a gesture class (open hand, pinch, fist) in real time, entirely on-device, with no connection to a PC or cloud server.
+
+- **Memory:** The model weights and intermediate activations must fit within the microcontroller's available RAM and Flash. For example, a typical embedded offers only a range of 1 MiB to 4MiB of total memory, which severely limits model depth and width. Every layer added to the network has a direct cost in memory. This must be accounted for at design time.
+
+- **Compute:** Microcontrollers operate at low clock speeds (typically 80 - 240 MHz) and have no GPU or dedicated AI accelerator. Every arithmetic operation in the forward pass multiplications, additions, activation functions must complete within the available CPU cycles. Complex architectures like deep LSTMs or transformers are likely too expensive without aggressive optimization. We’ll prioritize time domain feature.
+
+- **Latency:** For a prosthetic arm, the delay between muscle contraction and gesture classification must be imperceptible to the user. A latency above ~200 - 300 ms will break the natural feel of the device. This means the entire pipeline signal acquisition, preprocessing, inference, and output must complete well within that window.
+
 
 ---
 
-## 2. Target Hardware: NUCLEO-F334R8
+## 2. Target Hardware: NUCLEO-WBA65RI
 
-The board available for the n-pulse project is the **STMicroelectronics NUCLEO-F334R8**, based on the STM32F334R8 microcontroller. Its key specifications are:
+The board available for the n-pulse project is the **STMicroelectronics NUCLEO-WBA65RI**, based on the STM32WBA65RI microcontroller. Its key specifications are:
 
 | Parameter | Value |
 |---|---|
-| Core | ARM Cortex-M4 with FPU |
-| Clock speed | 72 MHz |
-| Flash memory | 64 KB |
-| SRAM | 12 KB |
+| Core | ARM Cortex-M33 with FPU |
+| Clock speed | 100 MHz |
+| Flash memory | 2048 KB (2 MB) |
+| SRAM | 512 KB |
 | Toolchain | STM32CubeIDE |
 
-This board was selected as it is already in use within the project team (shared with the EEG signal pipeline). It is a low-cost, low-power development board typical of early-stage embedded research.
-
+This board provides excellent resource availability for embedded ML !
 
 ---
 
@@ -41,124 +47,98 @@ This board was selected as it is already in use within the project team (shared 
 **Key findings relevant to n-pulse:**
 
 - Reducing features from 144 to 80 or 64 channel-specific features produced up to a **31% reduction in total pipeline execution time** with negligible accuracy loss.
-- The main computational bottleneck was **feature extraction**, not model inference , specifically FFT-based frequency-domain features carry O(n³) complexity, whereas time-domain features (RMS, MAV, WL, ZC) carry O(n) complexity. RMS from channel 4 alone accounted for over 25% of Bagged Forest accuracy.
+- The main computational bottleneck was **feature extraction**, not model inference. Specifically, FFT-based frequency-domain features carry O(n³) complexity, whereas time-domain features (RMS, MAV) carry O(n) complexity. RMS from channel 4 alone accounted for over 25% of Bagged Forest accuracy.
 - The interrupt-driven firmware architecture (500 Hz base interrupt, circular buffer, 200 ms segmentation windows, modular filtering and inference blocks) is the correct way to build any real-time biosignal pipeline and is **directly reusable for n-pulse**.
-- Statistical validation methodology (1008 on-device predictions at 95% confidence) confirmed negligible accuracy loss from PC-to-MCU model conversion , this approach is reusable for n-pulse.
+- Statistical validation methodology (they did 1008 on-device predictions at 95% confidence) confirmed negligible accuracy loss from PC-to-MCU model conversion. This approach is reusable for n-pulse: we can compare accuracy on PC (original model) vs MCU (deployed C code) using the same test dataset to ensure the conversion does not degrade performance
 
 **Result:** Neural Network with 80 best features achieves 94.21% accuracy on the embedded system, 4.66 ms inference time, 449 KB memory footprint.
 
 ### Paper 2: Microcontroller Implementation of LSTM Neural Networks for Dynamic Hand Gesture Recognition
 
-**Signal and data:** 3-axis accelerometer from a wrist-worn smartwatch at ~9.1 Hz (SmartWatch Gesture Dataset). This is a different signal modality from n-pulse , the main value of this paper is its **deployment methodology**, not its signal pipeline.
+**Signal and data:** 3-axis accelerometer from a wrist-worn smartwatch at ~9.1 Hz (SmartWatch Gesture Dataset). This is a different signal modality from n-pulse. The main value of this paper is its **deployment methodology**, not its signal pipeline.
 
 **Model deployed:** Two stacked LSTM layers (100 + 50 units) + two dense layers, on an STM32L476RG (80 MHz Cortex-M4, 1 MB Flash, 128 KB SRAM).
 
 **Key findings relevant to n-pulse:**
 
 - **Analytical memory sizing before training:** the authors derived closed-form expressions for weight count and MACs as a function of layer dimensions, guaranteeing the model fits the target hardware before any training is done. This approach is reusable for any architecture.
-- **Data augmentation** (noise addition 5% σ, amplitude scaling ±10%, time warping ±30%) was used to double the training set size , directly applicable to n-pulse where collecting large labeled EMG datasets from many subjects is expensive.
-- **Subject-based cross-validation** (4-fold) ensures evaluation on unseen subjects , a non-negotiable validation requirement for a prosthetic that must generalize to its user.
-- Paper 2's Table 5 shows that a Cortex-M7 class board (e.g. STM32H743, 480 MHz) reduces LSTM inference from 418 ms to ~37–51 ms, comfortably within the 200 ms budget.
+- **Data augmentation** (noise addition 5% σ, amplitude scaling ±10%, time warping ±30%) was used to double the training set size. This is directly applicable to n-pulse where collecting large labeled EMG datasets from many subjects is expensive.
+- **Subject-based cross-validation** (4-fold) ensures evaluation on unseen subjects. This is a non-negotiable validation requirement for a prosthetic that must generalize to its user.
 
 **Result:** 90.25% accuracy (4-fold subject-based cross-validation), 292 KB Flash, 17 KB RAM, 418 ms inference on an 80 MHz Cortex-M4.
 
 ---
 
-## 4. Constraints Analysis for the NUCLEO-F334R8
+## 4. Constraints Analysis for the NUCLEO-WBA65RI
 
 ### 4.1 Memory
 
-The NUCLEO-F334R8 provides only **64 KB of Flash** and **12 KB of RAM**. This is extremely limited compared to what the reference literature requires:
+The NUCLEO-WBA65RI provides **2048 KB (2 MB) of Flash** and **512 KB of RAM**. This is a substantial resource pool for embedded ML deployment:
 
-- Paper 1's Bagged Forest (100 trees): **530 KB** , 8× more than available Flash
-- Paper 1's Neural Network (80 features): **449 KB** , still impossible
-- Paper 2's LSTM: **292 KB Flash + 17 KB RAM** , RAM alone exceeds the board's 12 KB
+**Model feasibility:**
+- Paper 1's Bagged Forest (100 trees): **530 KB** →  **Fits easily** (26% of available Flash)
+- Paper 1's Neural Network (80 features): **449 KB** →  **Fits easily** (22% of available Flash)
+- Paper 2's LSTM: **292 KB Flash + 17 KB RAM** →  **Fits easily** (14% Flash, 3% RAM)
 
-This means that the models tested in both reference papers **cannot be deployed on this board as-is**. Memory is the primary and most critical constraint for the NUCLEO-F334R8.
+**Conclusion:** Memory is **not a bottleneck** for n-pulse. The WBA65RI can be used with Random Forest, Neural Networks, and even LSTM models, all feasible deployment targets.
 
 ### 4.2 Compute
 
-At 72 MHz, the Cortex-M4 core from our current board is slightly slower than the 80 MHz board used in Paper 2, which already achieved 418 ms inference for an LSTM, far exceeding the real-time budget. For complex models, compute is therefore also a concern on this board.
-
-However, for simpler models such as logistic regression (see Section 5), the compute cost is trivial: inference reduces to a single matrix multiplication over the feature vector, which completes in microseconds at 72 MHz. Compute is therefore not a bottleneck for lightweight classifiers.
+At 100 MHz, the Cortex-M33 core is sufficient for real-time gesture recognition. Feature extraction dominates computational complexity: time-domain features (RMS, MAV, ZC) require O(n) operations per sample, while frequency-domain features (FFT) require O(n³) complexity (Paper 1). By prioritizing time-domain features, the total computational load for the complete pipeline (feature extraction + Random Forest inference) remains modest compared to the available CPU cycles.
 
 ### 4.3 Latency
 
-For a prosthetic arm, the delay between muscle contraction and gesture classification must be imperceptible to the user. A total pipeline latency above 200–300 ms breaks the natural feel of the device. The full pipeline includes signal acquisition, preprocessing (filtering + feature extraction), model inference, and output.
+For a prosthetic arm, the delay between muscle contraction and gesture classification must be imperceptible to the user. A total pipeline latency above 200-300 ms breaks the natural feel of the device. The full pipeline includes signal acquisition, preprocessing (filtering + feature extraction), model inference, and output.
 
-Based on Paper 1, feature extraction is the dominant cost , even on a 240 MHz board, it takes approximately 10 ms. On the 72 MHz NUCLEO-F334R8, this is estimated to scale to 30–40 ms. For a lightweight classifier such as logistic regression, inference adds negligible time, meaning the **200 ms latency target is achievable** if time-domain features are used. For complex models (Random Forest, LSTM), latency would likely exceed the budget.
-
-
----
-
-## 5. Assessment for n-pulse: Current Model Compatibility and Solutions
-
-### 5.1 Current Model: Random Forest
-
-The current n-pulse model is a **Random Forest**, a classical ML classifier. Unlike neural networks, it does not require TFLite or STM32Cube.AI for deployment , it can be converted to optimized C code using tools such as **micromlgen** or **Everywhereml**, generating a series of if-else decision tree statements that run directly on the microcontroller.
-
-However, the memory requirements of a standard Random Forest (100 trees) are incompatible with the NUCLEO-F334R8. Even after aggressive pruning (reduced tree count, limited depth) and feature selection, the gap between what the literature requires (~512 KB minimum) and what the board offers (64 KB Flash, 12 KB RAM) is too large to bridge without unacceptable accuracy loss.
-
-**Feature selection alone is insufficient:** going from 144 to 64 features reduced Bagged Forest memory from 530 KB to 512 KB in Paper 1 , a 3.5% improvement, far from the 8× reduction needed.
-
-### 5.2 Alternative Solution: Logistic Regression
-
-Given the board's constraints, **logistic regression** is the most viable model candidate. As a linear classifier, it stores only one coefficient per input feature plus a bias term per class. For 80 features and 6 gesture classes, this amounts to approximately:
-
-```
-80 features × 6 classes × 4 bytes (float32) = ~1.9 KB
-```
-
-This fits comfortably within the board's 64 KB Flash, using less than 3% of available memory. Inference is also trivially fast , a single matrix multiplication over the feature vector , meaning the 200 ms latency target is met with ease.
-
-The open question for logistic regression is **accuracy**: EMG gesture recognition is a non-linear problem, and linear classifiers may not achieve the 90%+ accuracy seen with Random Forest or Neural Networks in the literature. This trade-off between hardware feasibility and model expressiveness is the key design decision for n-pulse and should be validated experimentally once data is available.
-
-### 5.3 Alternative Solution: Board Upgrade
-
-If model accuracy is prioritized over hardware cost and power consumption, migrating to a more capable board would substantially simplify the deployment pipeline:
-
-| Board | Core | Clock | Flash | RAM | Feasibility |
-|---|---|---|---|---|---|
-| NUCLEO-F334R8 (current) | Cortex-M4 | 72 MHz | 64 KB | 12 KB | Only logistic regression |
-| STM32L476RG (Paper 2) | Cortex-M4 | 80 MHz | 1 MB | 128 KB | LSTM feasible |
-| STM32H743 | Cortex-M7 | 480 MHz | 2 MB | 1 MB | Full pipeline, 37 ms inference |
-
-A Cortex-M7 class board would support Random Forest, Neural Networks, and even LSTM models with inference well within the 200 ms budget. This comes at the cost of higher price (~€50–100 vs ~€15) and higher power consumption, which must be weighed against the wearable nature of a prosthetic device.
-
-This trade-off should be evaluated by the project team before committing to a deployment architecture.
+Based on Paper 1, feature extraction dominates at ~10 ms on a 240 MHz system. On the 100 MHz WBA65RI, this is estimated at **20-25 ms**. Random Forest inference (even 100 trees) adds minimal overhead (~5-10 ms). The **200 ms latency target is easily achievable** on this hardware.
 
 ---
 
-## 6. No Longer Relevant from the Papers
+## 5. Assessment for n-pulse: Model Compatibility and Recommendations
 
-Given that the current model is a **Random Forest** (not a neural network) and the target board is the **NUCLEO-F334R8**, the following elements from the reference papers do not apply to n-pulse in its current state:
+### 5.1 Primary Recommendation: Random Forest (Unmodified)
 
-- **Keras → TFLite → STM32Cube.AI pipeline (Paper 2):** this conversion chain is specific to neural networks. For a Random Forest or logistic regression, the equivalent is sklearn → micromlgen/Everywhereml → C code → STM32CubeIDE.
-- **Analytical LSTM memory sizing formulas (Paper 2):** the closed-form expressions for LSTM weight counts and MACs are architecture-specific and do not apply to tree-based or linear models.
-- **BatchNormalization, Dropout, softmax (Paper 2):** these are neural network training and regularization concepts with no equivalent in Random Forest or logistic regression.
-- **The ESP32-S3 as deployment target (Paper 1):** while validated as a capable platform, it is not the board in use at n-pulse. Its specs (240 MHz, sufficient Flash) are referenced only for comparison.
+The current **Random Forest model (100 trees) is fully viable** on the NUCLEO-WBA65RI:
+
+- **Memory:** ~530 KB → uses 26% of available Flash, leaves ample room for firmware, and future features
+- **Inference latency:** estimated 5-10 ms (Paper 1's baseline), well within the 200 ms budget
+- **Deployment pipeline:** sklearn → micromlgen/Everywhereml → C code → STM32CubeIDE
+
+**This is the recommended path forward.** The team can deploy the current Random Forest model without retraining or modification.
+
+### 5.2 Secondary Option: Neural Network (if higher accuracy desired)
+
+If Random Forest accuracy is insufficient once data is collected, upgrading to the **shallow neural network from Paper 1** is straightforward:
+
+- **Model:** 1 hidden layer, 144 ReLU neurons, 80 input features
+- **Memory footprint:** ~449 KB (22% of available Flash)
+- **Inference latency:** 4.66 ms (Paper 1)
+- **Accuracy:** 94.21% on the same EMG gesture task
+- **Deployment pipeline:** Keras → TFLite → STM32Cube.AI (X-CUBE-AI) → optimized C code → STM32CubeIDE
+
+This option is viable if higher accuracy is needed and the current Random Forest does not meet performance targets.
 
 ---
 
-## 7. Deployment Pipeline (Recommended)
+## 6. Deployment Pipeline 
 
-Based on the above analysis, the recommended pipeline for n-pulse given current constraints is:
+Recommended pipeline for n-pulse on the NUCLEO-WBA65RI is:
 
 ```
-Train model in sklearn (Python)
+Train Random Forest model in sklearn (Python)
         ↓
-Feature selection (time-domain features only: RMS, MAV, WL, ZC)
+Feature selection (time-domain features: RMS, MAV, WL, ZC)
         ↓
 Convert to C code using micromlgen / Everywhereml
         ↓
 Integrate into STM32CubeIDE firmware
         ↓
-Interrupt-driven real-time pipeline on NUCLEO-F334R8
+Interrupt-driven real-time pipeline on NUCLEO-WBA65RI
         ↓
 On-device validation (statistical sampling at 95% confidence)
 ```
 
-If the board is upgraded to a neural-network-compatible platform, the pipeline becomes:
+**Alternative pipeline from paper 2(if upgrading to neural network):**
 
 ```
 Train model in Keras (Google Colab)
@@ -167,17 +147,26 @@ Convert to TFLite
         ↓
 Pass through STM32Cube.AI (X-CUBE-AI) → optimized C code
         ↓
-Flash to STM32 board via STM32CubeIDE
+Flash to NUCLEO-WBA65RI via STM32CubeIDE
         ↓
 On-device validation
 ```
 
+Both pipelines are straightforward and require no custom firmware architecture. The interrupt-driven signal processing pipeline from Paper 1 remains the correct approach regardless of model choice.
+
 ---
 
-## 8. Open Questions & Next Steps
+## 7. Next Steps
 
-- **Validate logistic regression accuracy** on n-pulse EMG data once available , determine if it meets project requirements.
-- **Decide on board upgrade** , weigh accuracy needs against power and cost constraints for a wearable prosthetic.
-- **Implement interrupt-driven firmware pipeline** (reusable from Paper 1 regardless of model choice).
-- **Apply cross-validation** during training to ensure model generalization across users.
+- **Implement (convert code in C) and test Random Forest deployment** on the WBA65RI using micromlgen → verify actual inference latency and energy consumption on hardware.
+- **subject-based cross-validation** to ensure generalization across users.
+- **Validate Random Forest accuracy**, if insufficient, potentially evaluate other ml model upgrade path
+- **Interrupt-driven firmware pipeline (writing code on MCU)** (following Paper 1): 500 Hz acquisition, circular buffer, 200 ms segmentation windows, modular filtering and inference.
+- **Statistical validation** following Paper 1's methodology to confirm negligible accuracy loss in PC-to-MCU conversion.
+
+---
+
+## 8. Conclusion
+
+The NUCLEO-WBA65RI provides excellent resource availability for embedded ML deployment of the n-pulse gesture recognition pipeline. The team can deploy the current Random Forest model without modification, or invest in higher-accuracy architectures (neural networks, LSTM) with confidence that the hardware can support them. To optimize latency, from paper 1, time-domain features should be used the most possible instead of frequency-domain features (FFT), as they reduce feature extraction complexity from O(n³) to O(n). According to the paper 1, it achieved ~31% pipeline speedup while maintaining accuracy. From paper 1 and 2 computed memory usage, NUCLEO-WBA65RI can deploy all practical models for EMG/gesture recognition (Random Forest, Neural Network, LSTM). For models like large-scale Vision Transformers or uncompressed deep neural networks (>10 MB), deployment would not be feasible (not applicable to our project). Latency and inference speed are the limiting factorsbut they are well within the 200 ms real-time budget for prosthetic arm control, with an estimated 20-25 ms feature extraction and <10 ms model inference on the WBA65RI (based on comparison with paper 1 using bagged forest)
 
