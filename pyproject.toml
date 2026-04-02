@@ -1,5 +1,5 @@
 [project]
-name = "bmi-soft-emg-decoding"
+name = "bmiemg"
 version = "0.1.0"
 description = "Package to help manage all dependencies"
 authors = [
@@ -24,6 +24,9 @@ dependencies = [
     "rootutils (>=1.0.7,<2.0.0)",
     "pyxdf (>=1.17.4,<2.0.0)"
 ]
+
+[tool.poetry]
+packages = [{include = "bmiemg", from = "src"}]
 
 
 [build-system]

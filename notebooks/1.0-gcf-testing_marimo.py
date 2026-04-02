@@ -21,11 +21,26 @@ def _():
     import marimo as mo
     import numpy as np
     import polars as pl
+    import pandas as pd
 
     from pathlib import Path
     from scipy import signal
 
-    return Path, mo, np, os, pl, pyxdf, signal
+    from bmiemg.preprocessing import notch_filter, passband_filter
+    from bmiemg.snr import known_noise, SNR
+    from bmiemg.plots import plot_stacked_channels
+
+    return (
+        Path,
+        known_noise,
+        mo,
+        notch_filter,
+        os,
+        passband_filter,
+        pd,
+        plot_stacked_channels,
+        pyxdf,
+    )
 
 
 @app.cell
@@ -38,55 +53,6 @@ def _(Path):
     return DATA, SESSION, SUBJECT
 
 
-@app.cell
-def _(np, signal):
-    def notch_filter(df, fs=1000, freq=50.0, q=30.0, single=False):
-        """Remove power line interference at 50 Hz (or 60 Hz for US)"""
-        b, a = signal.iirnotch(freq, q, fs)
-    
-        filtered_df = df.copy()
-        for col in df.columns:
-            # Skip non-time-series columns
-            if col == 'window_index' or col == 'label':
-                continue
-
-            if not single:
-                # Apply filter only to columns that contain arrays
-                filtered_df[col] = df[col].apply(
-                    lambda x: signal.filtfilt(b, a, x) if isinstance(x, (list, np.ndarray)) and len(x) > 1 else x
-                )
-            else:
-                filtered_df[col] = signal.filtfilt(b, a, df[col])
-    
-        return filtered_df
-
-
-    def passband_filter(df, fs=1000, lowcut=20.0, highcut=300.0, order=4, single=False):
-        """Bandpass filter for EMG signals (20-450 Hz)"""
-        nyq = 0.5 * fs
-        low = lowcut / nyq
-        high = highcut / nyq
-        b, a = signal.butter(order, [low, high], btype='band')
-    
-        filtered_df = df.copy()
-        for col in df.columns:
-            # Skip non-time-series columns
-            if col == 'window_index' or col == 'label':
-                continue
-
-            if not single:
-                # Apply filter only to columns that contain arrays
-                filtered_df[col] = df[col].apply(
-                    lambda x: signal.filtfilt(b, a, x) if isinstance(x, (list, np.ndarray)) and len(x) > 1 else x
-                )
-            else:
-                filtered_df[col] = signal.filtfilt(b, a, df[col])
-    
-        return filtered_df
-
-    return notch_filter, passband_filter
-
-
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
@@ -97,7 +63,7 @@ def _(mo):
 
 
 @app.cell
-def _(DATA: "Path", SESSION, SUBJECT, os, pl, pyxdf):
+def _(DATA: "Path", SESSION, SUBJECT, os, pd, pyxdf):
     xdf_dir = DATA / f"raw/sub-P{SUBJECT}/ses-S{SESSION}/emg/"
     xdf_file = f'sub-P{SUBJECT}_ses-S{SESSION}_task-Default_run-001_emg_kraken.xdf'
     data_xdf_path = os.path.join(xdf_dir, xdf_file)
@@ -106,14 +72,11 @@ def _(DATA: "Path", SESSION, SUBJECT, os, pl, pyxdf):
     channels = streams[1]['time_series']
     timestamps = streams[1]['time_stamps']
 
-    data_df = pl.DataFrame(
+    data_df = pd.DataFrame(
         channels,
-        schema=['Channel_1', 'Channel_2', 'Channel_3', 'Channel_4', 'Channel_5', 'Channel_6']
+        columns=['Channel_1', 'Channel_2', 'Channel_3', 'Channel_4', 'Channel_5', 'Channel_6']
     )
-
-    data_df = data_df.with_columns(
-        pl.Series("Time", timestamps)
-    )
+    data_df['Time'] = timestamps
 
     data_df
     return (data_df,)
@@ -128,15 +91,37 @@ def _(mo):
 
 
 @app.cell
-def _(data_df, notch_filter, passband_filter, pd):
+def _(data_df, notch_filter, passband_filter, pd, plot_stacked_channels):
     time_df = data_df['Time']
-    channels_df = data_df.drop('Time')
+    channels_df = data_df.drop(columns='Time')
 
     filtered1_channels = notch_filter(channels_df, single=True)
     filtered2_channels = passband_filter(filtered1_channels, single=True)
 
     filtered_data_df = pd.concat([time_df, filtered2_channels], axis=1)
-    filtered_data_df
+    filtered_data_df = filtered_data_df.drop(columns=["Channel_5", "Channel_6"])
+
+    plot_stacked_channels(filtered_data_df)
+    return (filtered_data_df,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    We can evaluate the performance of our flitering by analysing the SNR. In this case we use known-noise approach, where a part of the recording with signl is taken and is compared to a part of the recording that there is no signal (baseline noise)
+    """)
+    return
+
+
+@app.cell
+def _(filtered_data_df, known_noise, plot_stacked_channels):
+    sig = filtered_data_df.loc[(filtered_data_df['Time'] >= 336120) & (filtered_data_df['Time'] < 336200)].copy()
+    noise  = filtered_data_df.loc[(filtered_data_df['Time'] >= 336020) & (filtered_data_df['Time'] < 336100)].copy()
+    plot_stacked_channels(sig)
+    plot_stacked_channels(noise)
+
+    snr = known_noise(filtered_data_df, (336120, 336200), (336020, 336100))
+    snr.summary
     return
 
 
