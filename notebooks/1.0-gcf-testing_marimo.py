@@ -125,10 +125,5 @@ def _(filtered_data_df, known_noise, plot_stacked_channels):
     return
 
 
-@app.cell
-def _():
-    return
-
-
 if __name__ == "__main__":
     app.run()
