@@ -12,11 +12,14 @@ import requests
 
 import xml.etree.ElementTree as ET
 
+from pathlib import Path
 from dotenv import load_dotenv
 from urllib.parse import quote, unquote, urlparse
 from requests.auth import HTTPBasicAuth
 
-load_dotenv()
+ROOT = Path(__file__).resolve().parents[4]
+load_dotenv(ROOT / ".venv")
+
 USERNAME = str(os.getenv("MAKER_USERNAME"))
 PASSWORD = str(os.getenv("MAKER_APP_PASSWORD"))
 DAV_USER = str(os.getenv("MAKER_DAV_USER"))
@@ -138,3 +141,10 @@ def download_folder(remote_folder: str, local_folder: str):
             filename = os.path.basename(rel_path)
             local_path = os.path.join(local_folder, filename)
             download_file(rel_path, local_path)
+
+if __name__ == '__main__':
+    #https://make-archives.epfl.ch/apps/files/files/222832?dir=/EPFL%20N-pulse/Quality%20Management%20System/BMI/bids/2025-11-12/sub-05/ses-01
+    download_folder(
+        remote_folder="EPFL N-pulse/Quality Management System/BMI/bids/2025-11-12/sub-05/ses-01",
+        local_folder=".data/bids/sub-05"
+    )
