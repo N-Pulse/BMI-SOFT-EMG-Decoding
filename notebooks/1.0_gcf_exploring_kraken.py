@@ -64,7 +64,7 @@ def _(mo):
 
 @app.cell
 def _(DATA: "Path", SESSION, SUBJECT, os, pd, pyxdf):
-    xdf_dir = DATA / f"raw/sub-P{SUBJECT}/ses-S{SESSION}/emg/"
+    xdf_dir = DATA / f"raw/sub-P{SUBJECT}/ses-S{SESSION}/"
     xdf_file = f'sub-P{SUBJECT}_ses-S{SESSION}_task-Default_run-001_emg_kraken.xdf'
     data_xdf_path = os.path.join(xdf_dir, xdf_file)
 
@@ -122,6 +122,11 @@ def _(filtered_data_df, known_noise, plot_stacked_channels):
 
     snr = known_noise(filtered_data_df, (336120, 336200), (336020, 336100))
     snr.summary
+    return
+
+
+@app.cell
+def _():
     return
 
 
