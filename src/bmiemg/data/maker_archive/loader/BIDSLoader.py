@@ -2,7 +2,8 @@
 # 0. Section: IMPORTS
 # ================================================================
 from dataclasses import dataclass
-from mne_bids import BIDSPath
+from mne_bids import BIDSPath, read_raw_bids
+from mne.io.fiff.raw import Raw
 
 from ...DataLoader import DataLoader
 from .file_structure import (
@@ -13,15 +14,22 @@ from .file_structure import (
 
 
 
-# ================================================================
-# 1. Section: Functions
-# ================================================================
 @dataclass
 class BIDSLoader(DataLoader):
+    # ================================================================
+    # 1. Section: Class functions
+    # ================================================================
     def is_dataset_bids(self) -> bool:
         return is_dataset_bids(self.data_dir)
 
+    def load_dataset(self, index: int) -> Raw:
+        return read_raw_bids(self.bids_paths[index])
 
+
+
+    # ================================================================
+    # 2. Section: Property
+    # ================================================================
     @property
     def bids_paths(self) -> list[BIDSPath]:
         is_perfect = self.is_dataset_bids()
