@@ -225,4 +225,5 @@ results/*
 libML/__pycache__/*
 
 .venv
+.env
 *.bkp
