@@ -36,9 +36,9 @@ if __name__ == '__main__':
     )
 
     request = Request(
-        url="EPFL N-pulse/Quality Management System/BMI/bids/2025-11-12/sub-05",
+        url="EPFL N-pulse/Quality Management System/BMI/bids/",
         filename=None,
-        out_path=Path("data/bids/sub-99")
+        out_path=Path("data/bids/")
     )
 
     archive_downloader = Downloader(

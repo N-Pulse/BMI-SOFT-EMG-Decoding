@@ -25,7 +25,7 @@ NAMESPACES = {
 # ================================================================
 # 1. Section: Functions
 # ================================================================
-def header(depth: int = 1) -> dict:
+def header(depth: int | str = 1) -> dict:
     return {
         "Depth": str(depth),
         "Content-Type": "application/xml",

@@ -25,7 +25,7 @@ def dav_url(dav_root: str, remote_path: str) -> str:
         return f"{dav_root}/{quote(remote_path)}"
     return dav_root
 
-def propfind(url: str, auth: HTTPBasicAuth, depth: int = 1) -> str:
+def propfind(url: str, auth: HTTPBasicAuth, depth: int | str = 1) -> str:
     r = requests.request(
         "PROPFIND",
         url,
@@ -79,7 +79,7 @@ def remote_relative_path(dav_user: str, href: str) -> str:
 # ================================================================
 # 2. Section: Download Functions
 # ================================================================
-def download_file(auth: HTTPBasicAuth, dav_root: str, remote_path: str, local_path: str):
+def download_file(auth: HTTPBasicAuth, dav_root: str, remote_path: str, local_path: str) -> None:
     os.makedirs(os.path.dirname(local_path), exist_ok=True)
     url = dav_url(dav_root, remote_path)
 
@@ -90,4 +90,33 @@ def download_file(auth: HTTPBasicAuth, dav_root: str, remote_path: str, local_pa
                 if chunk:
                     f.write(chunk)
 
-    print(f"Downloaded file: {remote_path} -> {local_path}")
+
+
+# ================================================================
+# 0. Section: Path naming
+# ================================================================
+def extract_path_of_interest(rel_path: str, server_path: str) -> str:
+    def split_path(path: str) -> list[str]:
+        return [part for part in path.strip("/").split("/") if part]
+
+    rel_parts = split_path(rel_path)
+    server_parts = split_path(server_path)
+
+    if not server_parts:
+        return "/".join(rel_parts)
+
+    # Try to find the deepest matching part of server_path inside rel_path.
+    # It prefers longer contiguous matches first.
+    for end in range(len(server_parts), 0, -1):
+        for length in range(end, 0, -1):
+            candidate = server_parts[end - length:end]
+
+            for start in range(len(rel_parts) - length, -1, -1):
+                if rel_parts[start:start + length] == candidate:
+                    return "/".join(rel_parts[start + length:])
+
+    raise ValueError(
+        f"No folder from server_path was found in rel_path:\n"
+        f"rel_path: {rel_path}\n"
+        f"server_path: {server_path}"
+    )

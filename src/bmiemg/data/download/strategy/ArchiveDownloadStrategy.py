@@ -5,7 +5,6 @@ import os
 import requests
 
 from dataclasses import dataclass, field
-from urllib.parse import quote, unquote, urlparse
 from tqdm import tqdm
 from requests import Response
 from requests.auth import HTTPBasicAuth
@@ -19,7 +18,8 @@ from .archive_utils import (
     propfind,
     parse_propfind,
     remote_relative_path,
-    download_file
+    download_file,
+    extract_path_of_interest
 )
 from .archive_vars import (
     BODY,
@@ -61,19 +61,24 @@ class ArchiveDownloadStrategy(DownloadStrategy):
         return response
 
     def download(self, request: Request) -> Path:
+        # 1. Makes sure we have a folder to download to
         os.makedirs(request.out_path, exist_ok=True)
 
+        # 2. Gets everyting inside the remote folder
         server_path = dav_url(self._dav_root, request.url)
-        xml_text = propfind(server_path, self._auth, depth=3)
+        xml_text = propfind(server_path, self._auth, depth="infinity")
         items = parse_propfind(xml_text)
 
-        for item in tqdm(items):
+        # 3. Iterates over every file
+        for item in tqdm(items, desc="Downloading files", unit="file"):
+            # 3.1 Get the relative path
             rel_path = remote_relative_path(self._dav_user, item["href"])
 
-            # Skip the folder itself (PROPFIND returns the folder as the first entry too)
+            # 3.2 Skip the folder itself (propfin returns the folder as the first entry too)
             if rel_path == request.url:
                 continue
 
+            # 3.3 Makes sub-folders if needed and downloads the files
             if item["is_dir"]:
                 remote_folder = extract_path_of_interest(rel_path, server_path)
                 folder = os.path.join(request.out_path, remote_folder)
@@ -87,41 +92,3 @@ class ArchiveDownloadStrategy(DownloadStrategy):
 
     def cleanup(self) -> None:
         return super().cleanup()
-
-
-
-def extract_path_of_interest(rel_path: str, server_path: str) -> str:
-    def split_path(path: str) -> list[str]:
-        return [part for part in path.strip("/").split("/") if part]
-
-    rel_parts = split_path(rel_path)
-    server_parts = split_path(server_path)
-
-    if not server_parts:
-        return "/".join(rel_parts)
-
-    # Try to find the deepest matching part of server_path inside rel_path.
-    # It prefers longer contiguous matches first.
-    for end in range(len(server_parts), 0, -1):
-        for length in range(end, 0, -1):
-            candidate = server_parts[end - length:end]
-
-            for start in range(len(rel_parts) - length, -1, -1):
-                if rel_parts[start:start + length] == candidate:
-                    return "/".join(rel_parts[start + length:])
-
-    raise ValueError(
-        f"No folder from server_path was found in rel_path:\n"
-        f"rel_path: {rel_path}\n"
-        f"server_path: {server_path}"
-    )
-
-def normalize_path(path: str) -> str:
-    # If path is a full URL, extract only the path part
-    parsed = urlparse(path)
-    path = parsed.path if parsed.scheme else path
-
-    # Decode %20 etc.
-    path = unquote(path)
-
-    return path.strip("/")
