@@ -91,26 +91,3 @@ def download_file(auth: HTTPBasicAuth, dav_root: str, remote_path: str, local_pa
                     f.write(chunk)
 
     print(f"Downloaded file: {remote_path} -> {local_path}")
-
-def download_folder(remote_folder: str, local_folder: str):
-    os.makedirs(local_folder, exist_ok=True)
-
-    xml_text = propfind(remote_folder, depth=1)
-    items = parse_propfind(xml_text)
-
-    remote_folder_clean = remote_folder.strip("/")
-
-    for item in items:
-        rel_path = remote_rel_path_from_href(item["href"])
-
-        # Skip the folder itself (PROPFIND returns the folder as the first entry too)
-        if rel_path == remote_folder_clean:
-            continue
-
-        if item["is_dir"]:
-            sub_local = os.path.join(local_folder, os.path.basename(rel_path))
-            download_folder(rel_path, sub_local)
-        else:
-            filename = os.path.basename(rel_path)
-            local_path = os.path.join(local_folder, filename)
-            download_file(rel_path, local_path)
