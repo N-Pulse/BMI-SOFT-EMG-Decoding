@@ -1,12 +1,7 @@
 # ================================================================
 # 0. Section: IMPORTS
 # ================================================================
-import numpy as np
-from matplotlib import pyplot as plt
-
 from bmiemg.data.maker_archive import BIDSLoader
-from bmiemg.plots import plot_emg_with_events
-from bmiemg.data.features import get_emg_channel_names, get_event_labels
 
 from pathlib import Path
 
@@ -29,7 +24,9 @@ if __name__ == '__main__':
         modality="emg",
         file_type=".fif"
     )
-
+    print()
+    print(bids.is_dataset_bids())
+    print()
     emg = bids.load_dataset(1)
 
     print("raw.info")

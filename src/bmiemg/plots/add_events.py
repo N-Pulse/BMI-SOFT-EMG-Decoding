@@ -21,7 +21,7 @@ def add_events(ax: Axes, visible_annotations: list) -> Axes:
         label = event_label if event_label not in seen_labels else None
         seen_labels.add(event_label)
 
-        if event_label[0] == '5':
+        if event_label[0] == '3':
             if duration > 0:
                 ax.axvspan(
                     onset,
