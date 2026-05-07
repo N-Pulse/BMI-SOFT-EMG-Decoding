@@ -4,8 +4,7 @@
 import pyxdf
 from pathlib import Path
 
-from .MarkerStream import MarkerStream
-from .SignalStream import SignalStream
+from .streams import SignalStream, MarkerStream
 from .XDFSession import XDFSession
 
 

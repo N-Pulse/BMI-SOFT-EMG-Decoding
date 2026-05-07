@@ -4,11 +4,6 @@
 # ================================================================
 # 0. Section: IMPORTS
 # ================================================================
-import mne
-import pyxdf
-
-import numpy as np
-import pandas as pd
 from matplotlib import pyplot as plt
 
 from pathlib import Path
@@ -41,3 +36,8 @@ if __name__ == '__main__':
     biotech_splitter = ChannelSplitter()
 
     bio_signal = biotech_splitter.split(session)
+    signal = bio_signal.attach_annotations()
+
+    signal["EMG"].plot()
+
+    plt.show()

@@ -4,8 +4,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from .SignalStream import SignalStream
-from .MarkerStream import MarkerStream
+from .streams import SignalStream, MarkerStream
 
 
 

@@ -8,10 +8,10 @@ import numpy as np
 from dataclasses import dataclass, field
 from copy import deepcopy
 
+from ..XDFSession import XDFSession
+from ..streams import SignalStream
+from ..BioSignalRecording import BioSignalRecording
 from .ChannelMap import ChannelMap, BIOTECH_MAP
-from .XDFSession import XDFSession
-from .BioSignalRecording import BioSignalRecording
-from .SignalStream import SignalStream
 
 
 
