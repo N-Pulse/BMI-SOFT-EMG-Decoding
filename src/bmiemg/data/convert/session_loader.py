@@ -13,7 +13,7 @@ from .XDFSession import XDFSession
 # ================================================================
 # 1. Section: Functions
 # ================================================================
-def load(path: Path) -> XDFSession:
+def session_load(path: Path) -> XDFSession:
     # 0. Loads the data
     streams, file_header = pyxdf.load_xdf(path)
 

@@ -32,11 +32,11 @@ class Stream:
 
     @property
     def channels(self) -> dict:
-        return self.info["desc"][0]["channels"][0]["channels"]
+        return self.info["desc"][0]["channels"][0]["channel"]
 
     @property
     def channel_names(self) -> np.ndarray:
-        return np.array([ch["name"] for ch in self.channels])
+        return np.array([ch["label"][0] for ch in self.channels])
 
     @property
     def channel_types(self) -> np.ndarray:

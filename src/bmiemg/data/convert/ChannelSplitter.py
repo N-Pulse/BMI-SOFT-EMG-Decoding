@@ -5,7 +5,7 @@ import mne
 
 import numpy as np
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from copy import deepcopy
 
 from .ChannelMap import ChannelMap, BIOTECH_MAP
@@ -20,16 +20,16 @@ from .SignalStream import SignalStream
 # ================================================================
 @dataclass
 class ChannelSplitter:
-    ch_map: ChannelMap = BIOTECH_MAP
+    ch_map: ChannelMap = field(default_factory=lambda: BIOTECH_MAP)
 
     def split(self, session: XDFSession) -> BioSignalRecording:
         # 0. Extract the data
         signal_stream = session.signal_stream
-        channel_types = signal_stream.channel_types
+        channel_names = signal_stream.channel_names
 
         # 1. Get the channel index where each modality lives
-        eeg_idx = np.flatnonzero(channel_types in self.ch_map.eeg_ch_names)
-        emg_idx = np.flatnonzero(channel_types in self.ch_map.emg_ch_names)
+        eeg_idx = np.flatnonzero(np.isin(channel_names, self.ch_map.eeg_ch_names))
+        emg_idx = np.flatnonzero(np.isin(channel_names, self.ch_map.emg_ch_names))
 
         # 1.A Validate the channel map findings
         if eeg_idx.size == 0:
@@ -74,7 +74,7 @@ def channel_subset_raw(
     out.raw_stream["info"]["channel_count"] = [str(len(indices))]
     out.raw_stream["info"]["segment_id"] = segment_id
 
-    out.raw_stream["info"]["desc"][0]["channels"][0]["channels"] = [
+    out.raw_stream["info"]["desc"][0]["channels"][0]["channel"] = [
         deepcopy(stream.channels[i]) for i in indices
     ]
 

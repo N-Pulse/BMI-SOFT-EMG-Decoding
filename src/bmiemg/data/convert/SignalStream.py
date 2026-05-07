@@ -33,6 +33,9 @@ class SignalStream(Stream):
                 f"channels, instead got: {unique_types}"
             )
 
+        if unique_types[0].lower() == "aux":
+            return "EMG"
+
         return unique_types[0]
 
 
@@ -46,9 +49,9 @@ class SignalStream(Stream):
         data = self.time_series.T
 
         mne_info = mne.create_info(
-            ch_names = self.channel_names,
+            ch_names = list(self.channel_names),
             sfreq = self.sfreq,
-            ch_types=self.main_ch_type,
+            ch_types=self.main_ch_type.lower(),
         )
 
         return mne.io.RawArray(data, mne_info)
