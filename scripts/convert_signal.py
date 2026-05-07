@@ -1,9 +1,14 @@
 # ================================================================
 # 0. Section: IMPORTS
 # ================================================================
-from bmiemg.data.maker_archive import BIDSLoader
+# ================================================================
+# 0. Section: IMPORTS
+# ================================================================
+from matplotlib import pyplot as plt
 
 from pathlib import Path
+
+from bmiemg.data.convert import session_load, ChannelSplitter
 
 
 
@@ -13,28 +18,20 @@ from pathlib import Path
 ROOT: Path = Path(__file__).resolve().parents[1]
 DATA: Path = ROOT / "data" / "bids"
 
+FILE: Path = DATA / "sub-05/ses-02/sourcedata/sub-05_ses-02_task-Up_run-01_raw.xdf"
+
 
 
 # ================================================================
 # 3. Section: MAIN
 # ================================================================
 if __name__ == '__main__':
-    bids = BIDSLoader(
-        data_dir=DATA,
-        modality="emg",
-        file_type=".fif"
-    )
-    print()
-    print(bids.is_dataset_bids())
-    print()
-    emg = bids.load_dataset(1)
+    session = session_load(FILE)
+    biotech_splitter = ChannelSplitter()
 
-    print("raw.info")
-    print(emg.info)
-    print()
-    print("raw.ch_names")
-    print(emg.ch_names)
-    print()
-    print("raw.annotations")
-    print(emg.annotations)
-    print()
+    bio_signal = biotech_splitter.split(session)
+    signal = bio_signal.attach_annotations()
+
+    signal["EMG"].plot()
+
+    plt.show()

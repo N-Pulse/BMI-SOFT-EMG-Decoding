@@ -15,7 +15,7 @@ from bmiemg.data.download import Credentials, Request, Downloader
 # 1. Section: INPUTS
 # ================================================================
 ROOT = Path(__file__).resolve().parents[1]
-load_dotenv(ROOT / ".venv")
+load_dotenv(ROOT / ".env")
 
 
 
