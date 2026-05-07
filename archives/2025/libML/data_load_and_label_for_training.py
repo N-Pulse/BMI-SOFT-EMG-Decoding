@@ -6,8 +6,8 @@ import numpy as np
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from libML.data_loading_xdf import load_emg_bids, find_bids_emg_files, get_emg_channels
-from libML.trigger_to_label import map_triggers_to_labels, convert_labels_to_dof_dict
+from libML. import load_emg_bids, find_bids_emg_files, get_emg_channels
+from libML. import map_triggers_to_labels, convert_labels_to_dof_dict
 
 def get_emg_labels_from_path(data_dir, subject="P005", session="S002", task="Default", run="001_eeg_up"):
     """
@@ -30,12 +30,12 @@ def load_single_emg_file(repo_root, strength_and_speed=False, subject="P005", se
     """
     try:
         print(f"Loading EMG data for subject {subject}, session {session}, task {task}, run {run}")
-        
+
         streams, header = load_emg_bids(repo_root, subject=subject, session=session, task=task, run=run)
-        
+
         if not streams:
             raise ValueError(f"No EMG data found for the specified parameters")
-        
+
         emg_channels = get_emg_channels(streams)
 
         trigger_stream = streams[0]
@@ -47,13 +47,13 @@ def load_single_emg_file(repo_root, strength_and_speed=False, subject="P005", se
         except OverflowError:
             print("Warning: Overflow in time_series, trying float64")
             X_raw = np.array(labeled_data['time_series'], dtype=np.float64)
-        
+
         try:
             y_raw = np.array(labeled_data['labels'], dtype=np.int32)
         except OverflowError:
             print("Warning: Overflow in labels, trying int64")
             y_raw = np.array(labeled_data['labels'], dtype=np.int64)
-            
+
         timestamps = np.array(labeled_data['time_stamps'], dtype=np.float64)
 
         print(f"Successfully loaded.")
@@ -69,15 +69,15 @@ def load_single_emg_file(repo_root, strength_and_speed=False, subject="P005", se
             'task': task,
             'run': run
         }
-    
+
         return data_dict
-    
+
     except Exception as e:
         print(f"Error loading EMG data: {e}")
         import traceback
         traceback.print_exc()
         return None
-    
+
 
 def load_emg_data(repo_root, strength_and_speed=False, **filters):
     """
@@ -95,17 +95,17 @@ def load_emg_data(repo_root, strength_and_speed=False, **filters):
     Example:
         # Load all data
         all_data = load_emg_data(repo_root)
-        
+
         # Load specific subjects
         data_p1_p2 = load_emg_data(repo_root, subject=['P001', 'P002'])
-        
+
         # Load one subject, one session
         data_p1_s1 = load_emg_data(repo_root, subject='P001', session='S001')
-        
+
         # Load two runs for all subjects
         data_runs = load_emg_data(repo_root, run=['001_eeg_up', '002_eeg_down'])
     """
-    
+
     # 1. Normalize filters: Ensure all filter values are lists
     processed_filters = {}
     for key, value in filters.items():
@@ -113,7 +113,7 @@ def load_emg_data(repo_root, strength_and_speed=False, **filters):
             processed_filters[key] = [value] # Convert single string to list
         elif value is not None:
             processed_filters[key] = value # Already a list
-            
+
     print(f"Starting data load with filters: {processed_filters}")
 
     # 2. Compile BIDS regex to parse filenames
@@ -121,7 +121,7 @@ def load_emg_data(repo_root, strength_and_speed=False, **filters):
     bids_pattern = re.compile(
         r'sub-([a-zA-Z0-9]+)'           # Group 1: subject
         r'(?:_ses-([a-zA-Z0-9]+))?'     # Group 2: session (optional)
-        r'(?:_task-([a-zA-Z0-9]+))?'    # Group 3: task (optional)  
+        r'(?:_task-([a-zA-Z0-9]+))?'    # Group 3: task (optional)
         r'(?:_run-([a-zA-Z0-9_\-]+))?'  # Group 4: run (optional) - now allows underscores AND hyphens
     )
 
@@ -149,14 +149,14 @@ def load_emg_data(repo_root, strength_and_speed=False, **filters):
         file_key = match.group(0) # e.g., "sub-P005_ses-S002_task-Default_run-001_eeg_up"
         if file_key in loaded_file_keys:
             continue
-        
+
         components = {
             'subject': match.group(1),
             'session': match.group(2), # Will be None if not found
             'task': match.group(3),    # Will be None if not found
             'run': match.group(4)      # Will be None if not found
         }
-        
+
         # Check this file against the user's filters
         keep_file = True
         for key, allowed_values in processed_filters.items():
@@ -168,7 +168,7 @@ def load_emg_data(repo_root, strength_and_speed=False, **filters):
         if keep_file:
             # This file matches! Add its key to avoid duplicates.
             loaded_file_keys.add(file_key)
-            
+
             # Prepare arguments for load_single_emg_file
             # We only pass components that were *actually found* in the filename.
             # If a component is None, it's not passed, so the
@@ -177,10 +177,10 @@ def load_emg_data(repo_root, strength_and_speed=False, **filters):
             for key, val in components.items():
                 if val is not None:
                     load_args[key] = val
-                    
+
             # 5. Load the matching file
             data_dict = load_single_emg_file(**load_args)
-            
+
             if data_dict:
                 all_data_dicts.append(data_dict)
 
