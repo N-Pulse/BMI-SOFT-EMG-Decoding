@@ -4,6 +4,15 @@ __generated_with = "0.22.0"
 app = marimo.App(width="medium")
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Getting the building blocks
+    To train a model we need more than just the signal. We need to partition it into the blocks of signal vs movement. Thelp us doing this task, we convert the `.xdf` file into the `mne.Raw`, since the `mne` package has some cool and usefull functions.
+    """)
+    return
+
+
 @app.cell
 def _():
     import mne
@@ -16,8 +25,20 @@ def _():
     from pathlib import Path
 
     from bmiemg.data.convert import session_load, ChannelSplitter
+    from bmiemg.data.epoch import SignalPartitioner, V1_TRIGGER_MAP, average_movement_duration
+    from bmiemg.preprocessing import get_envelop
 
-    return ChannelSplitter, Path, mne, np, pd, plt, session_load
+    return (
+        ChannelSplitter,
+        Path,
+        SignalPartitioner,
+        V1_TRIGGER_MAP,
+        get_envelop,
+        mo,
+        np,
+        plt,
+        session_load,
+    )
 
 
 @app.cell
@@ -27,6 +48,21 @@ def _(Path):
 
     FILE: Path = DATA / "sub-05/ses-02/sourcedata/sub-05_ses-02_task-Up_run-01_raw.xdf"
     return (FILE,)
+
+
+@app.cell
+def _(FILE: "Path", mo):
+    with mo.redirect_stdout():
+        print(f"File for this demo: {str(FILE.name)}")
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    We first can just extract the emg signal out of the `.xdf
+    """)
+    return
 
 
 @app.cell
@@ -41,240 +77,82 @@ def _(ChannelSplitter, FILE: "Path", session_load):
 
 
 @app.cell
-def _(emg_signal):
-    movement_labels = sorted({
-        desc for desc in emg_signal.annotations.description
-        if str(desc).startswith("3")
-    })
-    print(movement_labels)
-    return (movement_labels,)
+def _(emg_signal, mo):
+    print(emg_signal)
+    X = emg_signal.get_data()
+
+    with mo.redirect_stdout():
+        print(f"The data has the following shape: {X.shape}")
+    return
 
 
-@app.cell
-def _(emg_signal, mne):
-    events, event_id = mne.events_from_annotations(
-        emg_signal,
-        event_id={
-            '32101': 32101,
-            '32102': 32102,
-            '32103': 32103,
-            '32104': 32104,
-            '32106': 32106,
-            '32107': 32107,
-            '32108': 32108,
-            '32111': 32111,
-            '32112': 32112,
-            '32113': 32113,
-            '32114': 32114,
-            '32116': 32116,
-        },
-    )
-    return event_id, events
-
-
-@app.cell
-def _(emg_signal, event_id, events, mne):
-    raw_centered = emg_signal.copy().load_data()
-
-    raw_centered.apply_function(
-            lambda x: x - x.mean(),
-            picks="all",
-            channel_wise=True,
-        )
-
-
-    epochs = mne.Epochs(
-            raw=emg_signal,
-            events=events,
-            event_id=event_id,
-            tmin=-0.5,
-            tmax=5.0,
-            baseline=(-0.5, 0.0),
-            preload=True,
-        )
-    return (epochs,)
-
-
-@app.cell
-def _(epochs):
-    print(epochs.ch_names)
-    print(epochs.get_channel_types())
-    print(epochs.info)
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    Then it's time to separate by epochs, that is, the snippets where movement was present. For this session we will use the V1 Protocol, but this will need to get mapped at some point.
+    """)
     return
 
 
 @app.cell
-def _(epochs, plt):
-    epochs.plot(picks=epochs.ch_names)
-    plt.show()
+def _(SignalPartitioner, V1_TRIGGER_MAP, emg_signal):
+    partinioner = SignalPartitioner(V1_TRIGGER_MAP)
+    emg_epochs = partinioner.partition(emg_signal)
+    return (emg_epochs,)
+
+
+@app.cell
+def _(emg_epochs, mo, plt):
+    fig1 = emg_epochs.plot(picks=emg_epochs.ch_names, show=False)
+    plt.close(fig1)
+
+    out = mo.mpl.interactive(fig1)
+    out
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    We can also inspect by movement and see the average signal
+    """)
     return
 
 
 @app.cell
-def _(np, pd):
-    def clean_marker(desc) -> str:
-        return (
-            str(desc)
-            .replace("[", "")
-            .replace("]", "")
-            .replace("'", "")
-            .replace('"', "")
-            .strip()
-        )
-
-    def time_from_marker_to_next(raw, target_marker: str = "32101") -> pd.DataFrame:
-        annotations = raw.annotations
-
-        onsets = np.asarray(annotations.onset, dtype=float)
-        descriptions = np.array([clean_marker(d) for d in annotations.description])
-
-        # Ensure annotations are ordered by time
-        order = np.argsort(onsets)
-        onsets = onsets[order]
-        descriptions = descriptions[order]
-
-        rows = []
-
-        for i, desc in enumerate(descriptions):
-            if desc != target_marker:
-                continue
-
-            # Skip if this is the last marker
-            if i + 1 >= len(descriptions):
-                continue
-
-            start_time = onsets[i]
-            next_time = onsets[i + 1]
-            next_marker = descriptions[i + 1]
-
-            rows.append(
-                {
-                    "marker": desc,
-                    "start_time_s": start_time,
-                    "next_marker": next_marker,
-                    "next_time_s": next_time,
-                    "duration_s": next_time - start_time,
-                }
-            )
-
-        return pd.DataFrame(rows)
-
-    return (time_from_marker_to_next,)
+def _(emg_epochs, mo):
+    fig2 = emg_epochs["32101"].average(picks=["AUX8"]).plot(picks="all", show=False)
+    mo.mpl.interactive(fig2)
+    return
 
 
-@app.cell
-def _(emg_signal, movement_labels, np, time_from_marker_to_next):
-    dur = []
-    for lab in movement_labels:
-        durations_32101 = time_from_marker_to_next(emg_signal, target_marker=lab)
-        dur.append(durations_32101["duration_s"].mean())
-
-    #durations_32101 = time_from_marker_to_next(emg_signal, target_marker="32101")
-
-    print(f"{np.mean(dur)} ± {np.std(dur)}")
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    However, this is very noisy, so we need to apply an envelop. We can achieve this with `get_envelop()` function
+    """)
     return
 
 
 @app.cell
-def _(epochs):
-    print(epochs)
-    print(epochs.event_id)
-    print(epochs.ch_names)
-    print(epochs.get_channel_types())
-    print(epochs.get_data().shape)
+def _(emg_epochs, get_envelop):
+    emg_envelop_epochs = get_envelop(emg_epochs)
+    return (emg_envelop_epochs,)
+
+
+@app.cell
+def _(emg_envelop_epochs, mo):
+    fig3 = emg_envelop_epochs["32101"].average(picks=["AUX8"]).plot(picks="all", show=False)
+    mo.mpl.interactive(fig3)
     return
 
 
-@app.cell
-def _(epochs):
-    X = epochs.get_data()
-    print(X.shape)
-    return
-
-
-@app.cell
-def _(epochs, np):
-    event_codes = epochs.events[:, -1]
-
-    for label, code in epochs.event_id.items():
-        count = np.sum(event_codes == code)
-        print(label, count)
-    return
-
-
-@app.cell
-def _(epochs, mne, np):
-    from scipy.ndimage import uniform_filter1d
-
-
-    def moving_rms_envelope(
-        epochs: mne.Epochs,
-        window_s: float = 0.200,
-        picks: str | list[str] | None = "all",
-    ) -> mne.Epochs:
-        env = epochs.copy().load_data()
-
-        sfreq = env.info["sfreq"]
-        window_samples = max(1, int(round(window_s * sfreq)))
-
-        def rms(x: np.ndarray) -> np.ndarray:
-            return np.sqrt(
-                uniform_filter1d(
-                    x ** 2,
-                    size=window_samples,
-                    mode="reflect",
-                )
-            )
-
-        env.apply_function(
-            rms,
-            picks=picks,
-            channel_wise=True,
-        )
-
-        return env
-
-    envelope_epochs_2 = moving_rms_envelope(
-        epochs,
-        window_s=0.100,
-    )
-    return (envelope_epochs_2,)
-
-
-@app.cell
-def _(envelope_epochs_2, plt):
-    envelope_epochs_2.plot(picks=envelope_epochs_2.ch_names)
-    plt.show()
-    return
-
-
-@app.cell
-def _(envelope_epochs_2):
-    envelope_epochs_2["32101"].average(picks=["all"]).plot(picks="all")
-    return
-
-
-@app.cell
-def _(epochs):
-    def _():
-        print("Epoch channels:", epochs.ch_names)
-        print("Epoch channel types:", epochs.get_channel_types())
-        print("Epoch data shape:", epochs.get_data().shape)
-
-        evoked = epochs
-
-        print("Evoked channels:", evoked.ch_names)
-        return print("Evoked data shape:", evoked.get_data().shape)
-
-
-    _()
-    return
-
-
-@app.cell
-def _(epochs):
-    for movement_label in epochs.event_id:
-        epochs[movement_label].average().plot()
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Building a decoder
+    Once the data is in this state, building a decoder becomes incredebily easy:
+    """)
     return
 
 
@@ -300,9 +178,9 @@ def _(np):
 
 
 @app.cell
-def _(epochs, extract_emg_features):
-    X_signal = epochs.get_data()
-    y = epochs.events[:, -1]
+def _(emg_envelop_epochs, extract_emg_features):
+    X_signal = emg_envelop_epochs.get_data()
+    y = emg_envelop_epochs.events[:, -1]
 
     X_features = extract_emg_features(X_signal)
 
@@ -312,7 +190,7 @@ def _(epochs, extract_emg_features):
 
 
 @app.cell
-def _(X_features, y):
+def _(X_features, mo, y):
     from sklearn.model_selection import cross_val_score
     from sklearn.pipeline import make_pipeline
     from sklearn.preprocessing import StandardScaler
@@ -325,8 +203,9 @@ def _(X_features, y):
 
     scores = cross_val_score(clf, X_features, y, cv=5)
 
-    print(scores)
-    print("Mean accuracy:", scores.mean())
+    with mo.redirect_stdout():
+        print("A simple logistic regression will achieve:")
+        print("Mean accuracy:", scores.mean())
     return
 
 

@@ -6,6 +6,7 @@ import mne
 from dataclasses import dataclass
 
 from .TriggerMap import TriggerMap
+from .duration import average_movement_duration
 
 
 
@@ -16,7 +17,7 @@ from .TriggerMap import TriggerMap
 class SignalPartitioner:
     trigger_map: TriggerMap
 
-    def partition(self, raw: mne.io.RawArray, movement_duration: float = 5.0) -> mne.Epoch:
+    def partition(self, raw: mne.io.RawArray, movement_duration: float = 5.0) -> mne.Epochs:
         # 1. Get all the movement labels present on the signal
         movement_labels = get_labels_at_position(
             raw,
@@ -30,6 +31,9 @@ class SignalPartitioner:
             raw=raw,
             event_id=event_id_map # type: ignore[arg-type]
         )
+
+        # 2.1 Inform on trial duration
+        average_movement_duration(raw, movement_labels)
 
         # 3. Build the epochs
         epochs = mne.Epochs(
