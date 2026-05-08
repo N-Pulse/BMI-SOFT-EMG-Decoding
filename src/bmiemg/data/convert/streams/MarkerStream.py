@@ -32,9 +32,14 @@ class MarkerStream(Stream):
             for index, timestamp in enumerate(self.time_stamps)
         ]
 
+        durations = np.zeros(len(onsets), dtype=float)
+        if len(onsets) > 1:
+            durations[:-1] = onsets[1:] - onsets[:-1]
+        durations[-1] = 0.0
+
         return mne.Annotations(
             onset = onsets,
-            duration = np.zeros(len(onsets)),
+            duration = np.zeros(len(onsets), dtype=float),
             description = descriptions,
             extras = extras
         )
