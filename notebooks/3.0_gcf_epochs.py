@@ -1,7 +1,10 @@
 import marimo
 
 __generated_with = "0.22.0"
-app = marimo.App(width="medium")
+app = marimo.App(
+    width="medium",
+    layout_file="layouts/3.0_gcf_epochs.slides.json",
+)
 
 
 @app.cell(hide_code=True)
@@ -114,36 +117,76 @@ def _(emg_epochs, mo, plt):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    We can also inspect by movement and see the average signal
+    We can also inspect by movement and see the average signal. However, this is very noisy, so we need to apply an envelop. We can achieve this with `get_envelop()` function
     """)
     return
 
 
 @app.cell
 def _(emg_epochs, mo):
-    fig2 = emg_epochs["32101"].average(picks=["AUX8"]).plot(picks="all", show=False)
-    mo.mpl.interactive(fig2)
-    return
+    window_slider = mo.ui.slider(
+        start=0.020,
+        stop=0.500,
+        step=0.010,
+        value=0.100,
+        label="RMS window size (s)",
+        show_value=True,
+        debounce=True,
+    )
 
+    movement_labels = list(emg_epochs.event_id.keys())
+    movement_dropdown = mo.ui.dropdown(
+        options=movement_labels,
+        value=movement_labels[0],
+        label="Movement",
+        searchable=True,
+    )
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    However, this is very noisy, so we need to apply an envelop. We can achieve this with `get_envelop()` function
-    """)
-    return
+    channel_names = emg_epochs.ch_names
+    channel_dropdown = mo.ui.dropdown(
+        options=channel_names,
+        value=channel_names[0],
+        label="Channel",
+        searchable=True,
+    )
+
+    controls = mo.hstack([
+        window_slider,
+        movement_dropdown,
+        channel_dropdown,
+    ])
+
+    controls
+    return channel_dropdown, movement_dropdown, window_slider
 
 
 @app.cell
-def _(emg_epochs, get_envelop):
-    emg_envelop_epochs = get_envelop(emg_epochs)
-    return (emg_envelop_epochs,)
+def _(channel_dropdown, movement_dropdown, window_slider):
+    window_s = float(window_slider.value)
+    movement = movement_dropdown.value
+    channel = channel_dropdown.value
+    return channel, movement, window_s
 
 
 @app.cell
-def _(emg_envelop_epochs, mo):
-    fig3 = emg_envelop_epochs["32101"].average(picks=["AUX8"]).plot(picks="all", show=False)
-    mo.mpl.interactive(fig3)
+def _(channel, emg_epochs, get_envelop, movement, window_s):
+    fig2 = emg_epochs[movement].average(picks=[channel]).plot(picks="all", show=False)
+    emg_envelop_epochs = get_envelop(
+        emg_epochs,
+        window_s=window_s,
+    )
+    fig3 = emg_envelop_epochs[movement].average(picks=[channel]).plot(picks="all", show=False)
+    return emg_envelop_epochs, fig2, fig3
+
+
+@app.cell
+def _(fig2, fig3, mo):
+    signal_stack = mo.vstack([
+        mo.mpl.interactive(fig2),
+        mo.mpl.interactive(fig3)
+    ])
+
+    signal_stack
     return
 
 
