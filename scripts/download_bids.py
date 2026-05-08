@@ -38,7 +38,10 @@ if __name__ == '__main__':
     request = Request(
         url="EPFL N-pulse/Quality Management System/BMI/bids/",
         filename=None,
-        out_path=Path("data/bids/")
+        out_path=Path("data/bids/"),
+        extra={
+            "ignore": ["eeg", "emg"]
+        }
     )
 
     archive_downloader = Downloader(

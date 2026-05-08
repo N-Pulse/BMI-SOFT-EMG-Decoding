@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from tqdm import tqdm
 from requests import Response
 from requests.auth import HTTPBasicAuth
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .DownloadStrategy import DownloadStrategy
 from ..Credentials import Credentials
@@ -70,12 +70,17 @@ class ArchiveDownloadStrategy(DownloadStrategy):
         items = parse_propfind(xml_text)
 
         # 3. Iterates over every file
+        ignore = set(request.extra.get("ignore", []))
         for item in tqdm(items, desc="Downloading files", unit="file"):
             # 3.1 Get the relative path
             rel_path = remote_relative_path(self._dav_user, item["href"])
 
             # 3.2 Skip the folder itself (propfin returns the folder as the first entry too)
             if rel_path == request.url:
+                continue
+
+            rel_parts = PurePosixPath(rel_path).parts
+            if any(part in ignore for part in rel_parts):
                 continue
 
             # 3.3 Makes sub-folders if needed and downloads the files
