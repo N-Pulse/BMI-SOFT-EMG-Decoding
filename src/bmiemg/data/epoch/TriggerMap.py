@@ -7,7 +7,8 @@ from .code_children import (
     PhaseCode,
     ArmCode,
     TrialCode,
-    MovementCode
+    MovementCode,
+    TargetMovementCode
 )
 
 
@@ -22,6 +23,7 @@ class TriggerMap:
     arm_code: ArmCode
     trial_code: TrialCode
     mov_code: MovementCode
+    target_code: TargetMovementCode
 
     @property
     def movement_id(self) -> tuple[int, int]:
@@ -100,5 +102,12 @@ V1_TRIGGER_MAP: TriggerMap = TriggerMap(
             27:	"open_thumb_3sec",
         },
         code_pos = 3
+    ),
+    target_code = TargetMovementCode(
+        {
+            "grasp": [3, 4, 5, 6, 8, 15, 16],
+            "wrist": [11, 12, 13, 14],
+            "pinch": [18, 19, 20, 21, 22]
+        }
     )
 )

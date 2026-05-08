@@ -25,3 +25,7 @@ class TrialCode(Code):
 @dataclass
 class MovementCode(Code):
     pass
+
+@dataclass
+class TargetMovementCode:
+    code_dict: dict[str, list[int]]

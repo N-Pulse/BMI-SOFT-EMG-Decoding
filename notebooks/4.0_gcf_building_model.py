@@ -1,24 +1,15 @@
 import marimo
 
 __generated_with = "0.22.0"
-app = marimo.App(
-    width="medium",
-    layout_file="layouts/3.0_gcf_epochs.slides.json",
-)
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    # Getting the building blocks
-    To train a model we need more than just the signal. We need to partition it into the blocks of signal vs movement. Thelp us doing this task, we convert the `.xdf` file into the `mne.Raw`, since the `mne` package has some cool and usefull functions.
-    """)
-    return
+app = marimo.App(width="medium")
 
 
 @app.cell
 def _():
     import mne
+    import contextlib
+    import io
+    import gc
 
     import numpy as np
     import pandas as pd
@@ -26,6 +17,12 @@ def _():
     from matplotlib import pyplot as plt
 
     from pathlib import Path
+    from datetime import date, datetime
+    from sklearn.model_selection import cross_val_score
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.tree import DecisionTreeClassifier
 
     from bmiemg.data.convert import session_load, ChannelSplitter
     from bmiemg.data.epoch import SignalPartitioner, V1_TRIGGER_MAP, average_movement_duration
@@ -33,10 +30,20 @@ def _():
 
     return (
         ChannelSplitter,
+        DecisionTreeClassifier,
+        LogisticRegression,
         Path,
         SignalPartitioner,
+        StandardScaler,
         V1_TRIGGER_MAP,
+        contextlib,
+        cross_val_score,
+        date,
+        datetime,
         get_envelop,
+        io,
+        make_pipeline,
+        mne,
         mo,
         np,
         plt,
@@ -45,79 +52,88 @@ def _():
 
 
 @app.cell
-def _(Path):
+def _():
+    SESSIONS_TO_IGNORE = [
+        "sub-05_ses-04_task-Down_run-01_raw.xdf"
+    ]
+    SESSIONS_TO_IGNORE_SET = set(SESSIONS_TO_IGNORE)
+    return (SESSIONS_TO_IGNORE_SET,)
+
+
+@app.cell
+def _(Path, SESSIONS_TO_IGNORE_SET, date, datetime):
     ROOT: Path = Path(__file__).resolve().parents[1]
     DATA: Path = ROOT / "data" / "bids"
 
-    FILE: Path = DATA / "sub-05/ses-02/sourcedata/sub-05_ses-02_task-Up_run-01_raw.xdf"
-    return (FILE,)
+    CUTOFF_DATE = date(2025, 11, 21)
+
+
+    def get_date_from_parents(path: Path) -> date | None:
+        for parent in path.parents:
+            try:
+                return datetime.strptime(parent.name, "%Y-%m-%d").date()
+            except ValueError:
+                continue
+
+        return None
+
+
+    XDF_FILES = [
+        file
+        for file in DATA.rglob("*.xdf")
+        if file.is_file()
+        and file.name not in SESSIONS_TO_IGNORE_SET
+        and (folder_date := get_date_from_parents(file)) is not None
+        and folder_date < CUTOFF_DATE
+    ]
+    return (XDF_FILES,)
 
 
 @app.cell
-def _(FILE: "Path", mo):
+def _(XDF_FILES, mo):
     with mo.redirect_stdout():
-        print(f"File for this demo: {str(FILE.name)}")
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    We first can just extract the emg signal out of the `.xdf
-    """)
+        print(f"Files for this demo: {len(XDF_FILES)}")
     return
 
 
 @app.cell
-def _(ChannelSplitter, FILE: "Path", session_load):
-    # 1. Load the session
-    session = session_load(FILE)
+def _(ChannelSplitter, XDF_FILES, contextlib, io, session_load):
     biotech_splitter = ChannelSplitter()
-    return biotech_splitter, session
+
+    emg_signals = []
+    for file in XDF_FILES:
+        # 1. Load the session
+        print(f"Loading {file}")
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            session = session_load(file)
+            bio_signal = biotech_splitter.split(session)
+            signal = bio_signal.attach_annotations()
+            emg_signals.append(signal["EMG"])
+
+        del(bio_signal)
+        del(signal)
+        del(session)
+    return (emg_signals,)
 
 
 @app.cell
-def _(session):
-    session.signal_stream.time_series.shape, session.marker_stream.time_series.shape
-    return
+def _(SignalPartitioner, V1_TRIGGER_MAP, emg_signals):
+    epochs_group = []
+    for emg_signal in emg_signals:
+        partinioner = SignalPartitioner(V1_TRIGGER_MAP)
+        epochs_group.append(partinioner.partition(emg_signal))
+    return (epochs_group,)
 
 
 @app.cell
-def _(biotech_splitter, session):
-    bio_signal = biotech_splitter.split(session)
-    signal = bio_signal.attach_annotations()
-    emg_signal = signal["EMG"]
-    return (emg_signal,)
+def _(epochs_group, mne):
+    merged_epochs = mne.concatenate_epochs(epochs_group)
+    return (merged_epochs,)
 
 
 @app.cell
-def _(emg_signal, mo):
-    print(emg_signal)
-    X = emg_signal.get_data()
-
-    with mo.redirect_stdout():
-        print(f"The data has the following shape: {X.shape}")
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    Then it's time to separate by epochs, that is, the snippets where movement was present. For this session we will use the V1 Protocol, but this will need to get mapped at some point.
-    """)
-    return
-
-
-@app.cell
-def _(SignalPartitioner, V1_TRIGGER_MAP, emg_signal):
-    partinioner = SignalPartitioner(V1_TRIGGER_MAP)
-    emg_epochs = partinioner.partition(emg_signal)
-    return (emg_epochs,)
-
-
-@app.cell
-def _(emg_epochs, mo, plt):
-    fig1 = emg_epochs.plot(picks=emg_epochs.ch_names, show=False)
+def _(merged_epochs, mo, plt):
+    fig1 = merged_epochs.plot(picks=merged_epochs.ch_names, show=False)
     plt.close(fig1)
 
     out = mo.mpl.interactive(fig1)
@@ -125,16 +141,8 @@ def _(emg_epochs, mo, plt):
     return
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    We can also inspect by movement and see the average signal. However, this is very noisy, so we need to apply an envelop. We can achieve this with `get_envelop()` function
-    """)
-    return
-
-
 @app.cell
-def _(emg_epochs, mo):
+def _(merged_epochs, mo):
     window_slider = mo.ui.slider(
         start=0.020,
         stop=0.500,
@@ -145,7 +153,7 @@ def _(emg_epochs, mo):
         debounce=True,
     )
 
-    movement_labels = list(emg_epochs.event_id.keys())
+    movement_labels = list(merged_epochs.event_id.keys())
     movement_dropdown = mo.ui.dropdown(
         options=movement_labels,
         value=movement_labels[0],
@@ -153,7 +161,7 @@ def _(emg_epochs, mo):
         searchable=True,
     )
 
-    channel_names = emg_epochs.ch_names
+    channel_names = merged_epochs.ch_names
     channel_dropdown = mo.ui.dropdown(
         options=channel_names,
         value=channel_names[0],
@@ -161,30 +169,50 @@ def _(emg_epochs, mo):
         searchable=True,
     )
 
+    mode_names = [
+        'nearest',
+        'wrap',
+        'mirror',
+        'constant',
+        'grid-wrap',
+        'grid-wrap',
+        'grid-constant',
+        'grid-constant',
+    ]
+    mode_dropdown = mo.ui.dropdown(
+        options=mode_names,
+        value=mode_names[0],
+        label="Modes",
+        searchable=True,
+    )
+
     controls = mo.hstack([
         window_slider,
         movement_dropdown,
         channel_dropdown,
+        mode_dropdown
     ])
 
     controls
-    return channel_dropdown, movement_dropdown, window_slider
+    return channel_dropdown, mode_dropdown, movement_dropdown, window_slider
 
 
 @app.cell
-def _(channel_dropdown, movement_dropdown, window_slider):
+def _(channel_dropdown, mode_dropdown, movement_dropdown, window_slider):
     window_s = float(window_slider.value)
     movement = movement_dropdown.value
     channel = channel_dropdown.value
-    return channel, movement, window_s
+    mode = mode_dropdown.value
+    return channel, mode, movement, window_s
 
 
 @app.cell
-def _(channel, emg_epochs, get_envelop, movement, window_s):
-    fig2 = emg_epochs[movement].average(picks=[channel]).plot(picks="all", show=False)
+def _(channel, get_envelop, merged_epochs, mode, movement, window_s):
+    fig2 = merged_epochs[movement].average(picks=[channel]).plot(picks="all", show=False)
     emg_envelop_epochs = get_envelop(
-        emg_epochs,
+        merged_epochs,
         window_s=window_s,
+        mode=mode
     )
     fig3 = emg_envelop_epochs[movement].average(picks=[channel]).plot(picks="all", show=False)
     return emg_envelop_epochs, fig2, fig3
@@ -198,15 +226,6 @@ def _(fig2, fig3, mo):
     ])
 
     signal_stack
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Building a decoder
-    Once the data is in this state, building a decoder becomes incredebily easy:
-    """)
     return
 
 
@@ -323,16 +342,18 @@ def _(FEATURE_FUNCTIONS: list, np):
         Returns:
             features shape: (n_epochs, n_features)
         """
+        feature_val = []
         print(X.shape)
         print()
-        feature_val = []
+
         for feature_func in FEATURE_FUNCTIONS:
             #print(feature_func.__name__)
             val = feature_func(X)
             print(val.shape)
             feature_val.append(val)
-        
+
         features = np.concatenate(feature_val, axis=1)
+        print()
 
         return features
 
@@ -352,17 +373,19 @@ def _(emg_envelop_epochs, extract_emg_features):
 
 
 @app.cell
-def _(X_features, mo, y):
-    from sklearn.model_selection import cross_val_score
-    from sklearn.pipeline import make_pipeline
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.tree import DecisionTreeClassifier
-
+def _(
+    DecisionTreeClassifier,
+    StandardScaler,
+    X_features,
+    cross_val_score,
+    make_pipeline,
+    mo,
+    y,
+):
     clf = make_pipeline(
         StandardScaler(),
-        LogisticRegression(max_iter=1000),
-        #DecisionTreeClassifier(),
+        #LogisticRegression(max_iter=1000),
+        DecisionTreeClassifier(),
     )
 
     scores = cross_val_score(clf, X_features, y, cv=5)
@@ -370,6 +393,30 @@ def _(X_features, mo, y):
     with mo.redirect_stdout():
         print("A simple logistic regression will achieve:")
         print("Mean accuracy:", scores.mean())
+    return
+
+
+@app.cell
+def _(
+    LogisticRegression,
+    StandardScaler,
+    X_features,
+    cross_val_score,
+    make_pipeline,
+    mo,
+    y,
+):
+    clf_2 = make_pipeline(
+        StandardScaler(),
+        LogisticRegression(max_iter=1000),
+        #DecisionTreeClassifier(),
+    )
+
+    scores_2 = cross_val_score(clf_2, X_features, y, cv=5)
+
+    with mo.redirect_stdout():
+        print("A simple logistic regression will achieve:")
+        print("Mean accuracy:", scores_2.mean())
     return
 
 

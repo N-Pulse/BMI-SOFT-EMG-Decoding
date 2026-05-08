@@ -17,6 +17,7 @@ def get_envelop(
     epochs: mne.Epochs,
     window_s: float = 0.100,
     picks: str | list[str] | None = "all",
+    mode: str = "reflect"
 ) -> mne.Epochs:
     # 1. Load the data
     env = epochs.copy().load_data()
@@ -27,6 +28,7 @@ def get_envelop(
     rms_func = partial(
         moving_rms,
         window_samples=window_samples,
+        mode=mode
     )
     env.apply_function(
         rms_func,
@@ -40,11 +42,11 @@ def get_envelop(
 # ──────────────────────────────────────────────────────
 # 1.1 Subsection: Helper Functions
 # ──────────────────────────────────────────────────────
-def moving_rms(x: np.ndarray, window_samples: int) -> np.ndarray:
+def moving_rms(x: np.ndarray, window_samples: int, mode: str) -> np.ndarray:
     return np.sqrt(
         uniform_filter1d(
             x ** 2,
             size=window_samples,
-            mode="reflect",
+            mode=mode,
         )
     )
