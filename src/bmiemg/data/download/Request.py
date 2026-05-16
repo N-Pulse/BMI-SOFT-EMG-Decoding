@@ -1,7 +1,7 @@
 # ================================================================
 # 0. Section: IMPORTS
 # ================================================================
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -14,3 +14,4 @@ class Request:
     url: str
     filename: str | None
     out_path: Path
+    extra: dict = field(default_factory=dict)
