@@ -14,7 +14,7 @@ from scipy.ndimage import uniform_filter1d
 # 1. Section: Functions
 # ================================================================
 def get_envelop(
-    epochs: mne.Epochs,
+    epochs: mne.Epochs | mne.EpochsArray,
     window_s: float = 0.100,
     picks: str | list[str] | None = "all",
     mode: str = "reflect"

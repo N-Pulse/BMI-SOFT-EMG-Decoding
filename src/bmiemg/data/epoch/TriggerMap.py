@@ -7,8 +7,7 @@ from .code_children import (
     PhaseCode,
     ArmCode,
     TrialCode,
-    MovementCode,
-    TargetMovementCode
+    MovementCode
 )
 
 
@@ -23,7 +22,7 @@ class TriggerMap:
     arm_code: ArmCode
     trial_code: TrialCode
     mov_code: MovementCode
-    target_code: TargetMovementCode
+    target_code: dict[str, list[int]]
 
     @property
     def movement_id(self) -> tuple[int, int]:
@@ -103,11 +102,71 @@ V1_TRIGGER_MAP: TriggerMap = TriggerMap(
         },
         code_pos = 3
     ),
-    target_code = TargetMovementCode(
-        {
-            "grasp": [3, 4, 5, 6, 8, 15, 16],
-            "wrist": [11, 12, 13, 14],
-            "pinch": [18, 19, 20, 21, 22]
+    target_code = {
+            "open hand": [1, 2, 7],
+            "close hand": [3, 4, 5, 6, 8, 15, 16],
+            "rotate wrist right": [11, 12],
+            "rotate wrist left": [13, 14],
+            "pinch": [17]
         }
-    )
+)
+
+
+V2_TRIGGER_MAP: TriggerMap = TriggerMap(
+    special_triggers = {
+        9701: "resting state, eyes open",
+        9702: "resting state, eyes closed",
+        8888: "start LabRecorder",
+        9999: "a test marker (to test befiore the experiment start)",
+        8899: "experiment finished",
+    },
+    phase_code = PhaseCode(
+        code_dict = {
+            1: "cue",
+            3: "prep",
+            5: "move",
+            7: "return",
+            9: "iti",
+        },
+        code_pos = 0
+    ),
+    arm_code = ArmCode(
+        code_dict = {
+            1: "Left",
+            2: "Right",
+        },
+        code_pos = 1
+    ),
+    trial_code = TrialCode(
+        code_dict = {
+            1:	"Palm or fist up",
+            2:	"Palm or fist side",
+            3:	"Palm or fist down",
+        },
+        code_pos = 2
+    ),
+    mov_code = MovementCode(
+        code_dict = {
+            1:	"openhand_slow_3sec",
+            2:	"closetofist_allfingerstogether_slow_3sec",
+            3:	"closetofist_allfingerstogether_3sec_maxforce",
+            4:	"wrist_palmarflexion_normalforce_3sec",
+            5:	"wrist_palmarflexion_maxforce_3sec",
+            6:	"close_onlythumb_3sec",
+            7:	"Close only the thumb, 3 s",
+            8:	"wrist_dorsiflexion_normalforce_3sec",
+            9:	"wrist_dorsiflexion_maxforce_3sec",
+            10:	"grasp_donut_3sec",
+            11:	"grasp_cup_3sec",
+            12:	"grasping_pinching_pen_allfingers_3sec",
+        },
+        code_pos = 3
+    ),
+    target_code = {
+            "open hand": [1],
+            "close hand": [2, 3, 10, 11],
+            "rotate wrist right": [4, 5],
+            "rotate wrist left": [8, 9],
+            "pinch": [12],
+        }
 )

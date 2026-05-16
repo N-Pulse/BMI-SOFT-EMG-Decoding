@@ -3,11 +3,12 @@ from .filters import (
     passband_filter
 )
 from .envelop import get_envelop
-from .features import FEATURE_FUNCTIONS
+from .list_features import TIME_FEATURE_FUNCTIONS, FREQ_FEATURE_FUNCTIONS
 
 __all__ = [
     "notch_filter",
     "passband_filter",
     "get_envelop",
-    "FEATURE_FUNCTIONS"
+    "TIME_FEATURE_FUNCTIONS",
+    "FREQ_FEATURE_FUNCTIONS"
 ]

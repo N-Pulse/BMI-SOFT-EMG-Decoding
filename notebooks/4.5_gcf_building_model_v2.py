@@ -4,15 +4,6 @@ __generated_with = "0.22.0"
 app = marimo.App(width="medium")
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    # Building V1 Model
-    Let's create a decision tree model for binary classification on the V1 protocol
-    """)
-    return
-
-
 @app.cell
 def _():
     import mne
@@ -34,7 +25,7 @@ def _():
     from sklearn.tree import DecisionTreeClassifier
 
     from bmiemg.data.convert import session_load, ChannelSplitter
-    from bmiemg.data.epoch import SignalPartitioner, V1_TRIGGER_MAP, average_movement_duration
+    from bmiemg.data.epoch import SignalPartitioner, V2_TRIGGER_MAP, average_movement_duration
     from bmiemg.preprocessing import get_envelop
 
     return (
@@ -43,7 +34,7 @@ def _():
         Path,
         SignalPartitioner,
         StratifiedKFold,
-        V1_TRIGGER_MAP,
+        V2_TRIGGER_MAP,
         contextlib,
         cross_val_score,
         date,
@@ -53,6 +44,7 @@ def _():
         mne,
         mo,
         np,
+        pd,
         plt,
         session_load,
     )
@@ -61,14 +53,14 @@ def _():
 @app.cell
 def _():
     SESSIONS_TO_IGNORE = [
-        "sub-05_ses-04_task-Down_run-01_raw.xdf"
+
     ]
     SESSIONS_TO_IGNORE_SET = set(SESSIONS_TO_IGNORE)
     return (SESSIONS_TO_IGNORE_SET,)
 
 
 @app.cell
-def _(Path, SESSIONS_TO_IGNORE_SET, date, datetime):
+def _(Path, SESSIONS_TO_IGNORE_SET, date, datetime, mo):
     ROOT: Path = Path(__file__).resolve().parents[1]
     DATA: Path = ROOT / "data" / "bids"
 
@@ -91,16 +83,12 @@ def _(Path, SESSIONS_TO_IGNORE_SET, date, datetime):
         if file.is_file()
         and file.name not in SESSIONS_TO_IGNORE_SET
         and (folder_date := get_date_from_parents(file)) is not None
-        and folder_date < CUTOFF_DATE
+        and folder_date >= CUTOFF_DATE
     ]
-    return (XDF_FILES,)
 
-
-@app.cell
-def _(XDF_FILES, mo):
     with mo.redirect_stdout():
         print(f"Files for this demo: {len(XDF_FILES)}")
-    return
+    return (XDF_FILES,)
 
 
 @app.cell
@@ -124,9 +112,9 @@ def _(ChannelSplitter, XDF_FILES, contextlib, io, session_load):
 
 
 @app.cell
-def _(SignalPartitioner, V1_TRIGGER_MAP, emg_signals):
+def _(SignalPartitioner, V2_TRIGGER_MAP, emg_signals):
     epochs_group = []
-    partinioner = SignalPartitioner(V1_TRIGGER_MAP)
+    partinioner = SignalPartitioner(V2_TRIGGER_MAP)
     for emg_signal in emg_signals:
         epochs_group.append(partinioner.partition(emg_signal))
     return epochs_group, partinioner
@@ -287,7 +275,7 @@ def _(group, merged_epochs, partinioner):
 
     clean_epochs = grouped_epochs.copy().drop_bad(
         reject={
-            "emg": 100e-5,   # example threshold, in volts
+            "emg": 500e-6,   # example threshold, in volts
         }
     )
     clean_epochs = grouped_epochs.copy().drop_bad(
@@ -296,7 +284,7 @@ def _(group, merged_epochs, partinioner):
         }
     )
 
-    grouped_epochs = clean_epochs
+    grouped_epochs = clean_epochs.copy()
     return (grouped_epochs,)
 
 
@@ -401,132 +389,216 @@ def _(fig2, fig3, mo):
 @app.cell
 def _(np):
     # ================================================================
-    # 1. Section: Functions
+    # 0. Section: IMPORTS
     # ================================================================
-    def mav(x):
-        """Mean absolute value (MAV)"""
+
+
+    # ================================================================
+    # 1. Section: Time-domain features
+    # ================================================================
+    def mav(x: np.ndarray) -> np.ndarray:
+        """Mean absolute value."""
         return np.mean(np.abs(x), axis=2)
 
-    def std(x):
-        """Standard Deviation (STD)"""
+
+    def std(x: np.ndarray) -> np.ndarray:
+        """Standard deviation."""
         return np.std(x, axis=2)
 
-    def var(x):
-        """Variance"""
+
+    def var(x: np.ndarray) -> np.ndarray:
+        """Variance."""
         return np.var(x, axis=2)
 
-    def maxav(x):
-        """Maximum absolute Value (MaxAV)"""
+
+    def maxav(x: np.ndarray) -> np.ndarray:
+        """Maximum absolute value."""
         return np.max(np.abs(x), axis=2)
 
-    def rms(x):
-        """Root mean square (RMS)"""
+
+    def rms(x: np.ndarray) -> np.ndarray:
+        """Root mean square."""
         return np.sqrt(np.mean(x**2, axis=2))
 
-    def wl(x):
-        """Waveform length (WL)"""
+
+    def wl(x: np.ndarray) -> np.ndarray:
+        """Waveform length."""
         return np.sum(np.abs(np.diff(x, axis=2)), axis=2)
 
-    def ssc(x):
-        """Slope sign changes (SSC)"""
-        return np.sum((np.diff(x, axis=2)[:-1] * np.diff(x, axis=2)[1:]) < 0, axis=2)
 
-    def zc(x):
-        """Zero Crossing (ZC)"""
-        return np.sum(np.diff(np.sign(x), axis=2) != 0)
+    def ssc(x: np.ndarray) -> np.ndarray:
+        """Slope sign changes."""
+        dx = np.diff(x, axis=2)
+        return np.sum((dx[:, :, :-1] * dx[:, :, 1:]) < 0, axis=2)
 
-    def log_det(x):
-        """Log detector"""
-        return np.exp(1 / len(x) * np.sum(np.log(x), axis=2))
 
-    def wamp(x):
-        """Willison amplitude"""
-        return np.sum((x > 0.2 * np.std(x)), axis=2)
+    def zc(x: np.ndarray) -> np.ndarray:
+        """Zero crossings."""
+        return np.sum(np.diff(np.signbit(x), axis=2), axis=2)
 
-    def fft_values(x):
-        """Frequency domain features (FFT-based) - Value"""
-        return np.fft.fft(x, axis=2)
 
-    def fft_magnitude(x):
-        """Frequency domain features (FFT-based) - Magntiude"""
-        return np.abs(fft_values(x))
-
-    def fft_power(x):
-        """Frequency domain features (FFT-based) - Power"""
-        return np.square(fft_magnitude(x))
-
-    def freqs(x, srate: float = 1000.0):
+    def log_det(x: np.ndarray, eps: float = 1e-12) -> np.ndarray:
         """
-        Frequency domain features (FFT-based) - Frequency
-        Assuming a sampling rate of 1000 Hz
+        Log detector.
+
+        Uses abs(x) because EMG can be negative.
         """
-        return np.fft.fftfreq(x.shape[0], d=1/srate)
-
-    def total_power(x):
-        """Total power"""
-        return np.sum(fft_power(x), axis=2)
-
-    def mean_freq(x):
-        """Mean frequency"""
-        return np.sum(freqs(x) * fft_power(x), axis=2) / np.sum(fft_power(x), axis=2)
-
-    def median_freq(x):
-        """Median frequency"""
-        return np.median(freqs(x) * fft_power(x), axis=2)
-
-    def peak_freq(x):
-        """Peak frequency"""
-        return freqs(x)[np.argmax(fft_power(x), axis=2)]
+        return np.exp(np.mean(np.log(np.abs(x) + eps), axis=2))
 
 
-    FEATURE_FUNCTIONS: list = [
+    def wamp(x: np.ndarray, threshold: float = 20e-6) -> np.ndarray:
+        """
+        Willison amplitude.
+
+        Counts how often abs(diff) exceeds a threshold.
+        Threshold assumes signal is in volts.
+        """
+        dx = np.abs(np.diff(x, axis=2))
+        return np.sum(dx > threshold, axis=2)
+
+
+    # ================================================================
+    # 2. Section: Frequency-domain scalar features
+    # ================================================================
+    def fft_power(x: np.ndarray) -> np.ndarray:
+        """
+        One-sided FFT power spectrum.
+
+        Returns:
+            shape (n_epochs, n_channels, n_freqs)
+        """
+        fft = np.fft.rfft(x, axis=2)
+        return np.abs(fft) ** 2
+
+
+    def fft_freqs(x: np.ndarray, sfreq: float) -> np.ndarray:
+        """
+        One-sided FFT frequency vector.
+
+        Returns:
+            shape (n_freqs,)
+        """
+        return np.fft.rfftfreq(x.shape[2], d=1.0 / sfreq)
+
+
+    def total_power(x: np.ndarray, sfreq: float) -> np.ndarray:
+        """Total spectral power."""
+        power = fft_power(x)
+        return np.sum(power, axis=2)
+
+
+    def mean_freq(x: np.ndarray, sfreq: float) -> np.ndarray:
+        """Mean frequency."""
+        power = fft_power(x)
+        f = fft_freqs(x, sfreq)
+
+        denom = np.sum(power, axis=2)
+        denom = np.maximum(denom, 1e-12)
+
+        return np.sum(power * f[None, None, :], axis=2) / denom
+
+
+    def median_freq(x: np.ndarray, sfreq: float) -> np.ndarray:
+        """Median frequency based on cumulative spectral power."""
+        power = fft_power(x)
+        f = fft_freqs(x, sfreq)
+
+        cumulative_power = np.cumsum(power, axis=2)
+        half_power = cumulative_power[:, :, -1:] / 2.0
+
+        idx = np.argmax(cumulative_power >= half_power, axis=2)
+
+        return f[idx]
+
+
+    def peak_freq(x: np.ndarray, sfreq: float) -> np.ndarray:
+        """Peak frequency."""
+        power = fft_power(x)
+        f = fft_freqs(x, sfreq)
+
+        idx = np.argmax(power, axis=2)
+
+        return f[idx]
+    
+    # ================================================================
+    # 3. Section: Feature extraction
+    # ================================================================
+    TIME_FEATURE_FUNCTIONS = [
         mav,
         std,
         var,
         maxav,
         rms,
         wl,
-        #ssc,
-        #zc,
+        ssc,
+        zc,
         log_det,
         wamp,
-        #fft_values,
-        #fft_magnitude,
-        #fft_power,
-        #freqs,
-        total_power,
-        #mean_freq,
-        #median_freq,
-        #peak_freq,
     ]
-    return (FEATURE_FUNCTIONS,)
 
 
-@app.cell
-def _(FEATURE_FUNCTIONS: list, np):
-    def extract_emg_features(X: np.ndarray) -> np.ndarray:
+    FREQ_FEATURE_FUNCTIONS = [
+        total_power,
+        mean_freq,
+        median_freq,
+        peak_freq,
+    ]
+
+
+    def extract_emg_features(
+        X: np.ndarray,
+        sfreq: float,
+    ) -> np.ndarray:
         """
-        X shape: (n_epochs, n_channels, n_times)
+        X shape:
+            (n_epochs, n_channels, n_times)
 
         Returns:
-            features shape: (n_epochs, n_features)
+            (n_epochs, n_features)
+
+        If there are:
+            6 channels
+            10 time features
+            4 frequency features
+
+        Then:
+            n_features = 6 * 14 = 84
         """
-        feature_val = []
-        print(X.shape)
-        print()
+        feature_values = []
 
-        for feature_func in FEATURE_FUNCTIONS:
-            #print(feature_func.__name__)
+        print("Input X:", X.shape)
+
+        for feature_func in TIME_FEATURE_FUNCTIONS:
             val = feature_func(X)
-            print(val.shape)
-            feature_val.append(val)
 
-        features = np.concatenate(feature_val, axis=1)
-        print()
+            if val.ndim != 2:
+                raise ValueError(
+                    f"{feature_func.__name__} returned shape {val.shape}, "
+                    "expected (n_epochs, n_channels)."
+                )
+
+            print(feature_func.__name__, val.shape)
+            feature_values.append(val)
+
+        for feature_func in FREQ_FEATURE_FUNCTIONS:
+            val = feature_func(X, sfreq)
+
+            if val.ndim != 2:
+                raise ValueError(
+                    f"{feature_func.__name__} returned shape {val.shape}, "
+                    "expected (n_epochs, n_channels)."
+                )
+
+            print(feature_func.__name__, val.shape)
+            feature_values.append(val)
+
+        features = np.concatenate(feature_values, axis=1)
+
+        print("Final features:", features.shape)
 
         return features
 
-    return (extract_emg_features,)
+    return FREQ_FEATURE_FUNCTIONS, TIME_FEATURE_FUNCTIONS, extract_emg_features
 
 
 @app.cell
@@ -534,11 +606,18 @@ def _(emg_envelop_epochs, extract_emg_features):
     X_signal = emg_envelop_epochs.get_data()
     y = emg_envelop_epochs.events[:, -1]
 
-    X_features = extract_emg_features(X_signal)
+    sfreq = emg_envelop_epochs.info["sfreq"]
+    X_features = extract_emg_features(X_signal, sfreq)
 
     print(X_features.shape)
     print(y.shape)
     return X_features, y
+
+
+@app.cell
+def _():
+    model = "pinch"
+    return (model,)
 
 
 @app.cell
@@ -547,20 +626,19 @@ def _(
     StratifiedKFold,
     X_features,
     cross_val_score,
-    grouped_epochs,
+    emg_envelop_epochs,
     mo,
+    model,
     np,
     y,
 ):
-    grasp_code = grouped_epochs.event_id["wrist"]
+    grasp_code = emg_envelop_epochs.event_id[model]
 
     y_binary = (y == grasp_code).astype(int)
 
     print(np.unique(y_binary, return_counts=True))
 
     clf3 = DecisionTreeClassifier(
-        max_depth=4,
-        min_samples_leaf=5,
         random_state=42,
     )
 
@@ -582,6 +660,179 @@ def _(
         print("Decision tree: grasp vs no grasp")
         print("Scores:", scores3)
         print("Mean accuracy:", scores3.mean())
+    return clf3, cv, y_binary
+
+
+@app.cell
+def _(
+    FREQ_FEATURE_FUNCTIONS,
+    TIME_FEATURE_FUNCTIONS,
+    X_features,
+    clf3,
+    grouped_epochs,
+    pd,
+    y_binary,
+):
+    rows = []
+
+    for feature_func in TIME_FEATURE_FUNCTIONS:
+        for ch_name in grouped_epochs.ch_names:
+            rows.append({
+                "feature_type": feature_func.__name__,
+                "channel": ch_name,
+                "feature": f"{feature_func.__name__}_{ch_name}",
+            })
+
+    for feature_func in FREQ_FEATURE_FUNCTIONS:
+        for ch_name in grouped_epochs.ch_names:
+            rows.append({
+                "feature_type": feature_func.__name__,
+                "channel": ch_name,
+                "feature": f"{feature_func.__name__}_{ch_name}",
+            })
+
+    feature_info = pd.DataFrame(rows)
+
+    print(len(feature_info))
+    print(X_features.shape[1])
+
+    clf3.fit(X_features, y_binary)
+    feature_info["importance"] = clf3.feature_importances_
+    return (feature_info,)
+
+
+@app.cell
+def _(X_features, clf3, feature_info, plt, y_binary):
+    clf3.fit(X_features, y_binary)
+
+    feature_type_importance = (
+        feature_info
+        .groupby("feature_type", as_index=False)["importance"]
+        .sum()
+        .sort_values("importance", ascending=False)
+    )
+
+    print(feature_type_importance)
+
+    top_n = 20
+
+    plt.figure(figsize=(10, 6))
+
+    plt.barh(
+        feature_type_importance["feature_type"][::-1],
+        feature_type_importance["importance"][::-1],
+    )
+
+    plt.xlabel("Total importance across channels")
+    plt.title("Overall feature importance")
+    plt.tight_layout()
+    plt.show()
+    return (feature_type_importance,)
+
+
+@app.cell
+def _(feature_info, plt):
+    channel_importance = (
+        feature_info
+        .groupby("channel", as_index=False)["importance"]
+        .sum()
+        .sort_values("importance", ascending=False)
+    )
+
+    print(channel_importance)
+
+    plt.figure(figsize=(8, 5))
+
+    plt.barh(
+        channel_importance["channel"][::-1],
+        channel_importance["importance"][::-1],
+    )
+
+    plt.xlabel("Total importance across features")
+    plt.title("Channel importance")
+    plt.tight_layout()
+    plt.show()
+    return
+
+
+@app.cell
+def _(X_features, feature_info, feature_type_importance):
+    top_feature_types = (
+        feature_type_importance
+        .head(7)["feature_type"]
+        .tolist()
+    )
+
+    selected_indices = feature_info.index[
+        feature_info["feature_type"].isin(top_feature_types)
+    ].to_numpy()
+
+    X_selected = X_features[:, selected_indices]
+
+    print("Selected feature types:", top_feature_types)
+    print("Original:", X_features.shape)
+    print("Selected:", X_selected.shape)
+    return (X_selected,)
+
+
+@app.cell
+def _(X_selected, clf3, cross_val_score, cv, mo, y_binary):
+    scores_selected = cross_val_score(
+        clf3,
+        X_selected,
+        y_binary,
+        cv=cv,
+        scoring="accuracy",
+    )
+
+    with mo.redirect_stdout():
+        print("Decision tree with selected features")
+        print("Scores:", scores_selected)
+        print("Mean accuracy:", scores_selected.mean())
+    return
+
+
+@app.cell
+def _(DecisionTreeClassifier, StratifiedKFold, cross_val_score, mne, np, y):
+    def train_dt_all(
+        epochs: mne.EpochsArray | mne.Epochs,
+        model_name: str,
+        features: np.ndarray
+    ) -> tuple:
+        model_code = epochs.event_id[model_name]
+        y_binary = (y == model_code).astype(int) # 1 vs all
+
+        clf = DecisionTreeClassifier(
+            random_state=42,
+        )
+        cv = StratifiedKFold(
+            n_splits=5,
+            shuffle=True,
+            random_state=42,
+        )
+
+        scores = cross_val_score(
+            clf,
+            features,
+            y_binary,
+            cv=cv,
+            scoring="accuracy",
+        )
+
+        clf.fit(features, y_binary)
+
+        return clf, scores
+
+    return (train_dt_all,)
+
+
+@app.cell
+def _(X_selected, emg_envelop_epochs, model, train_dt_all):
+    clf, scores = train_dt_all(emg_envelop_epochs, model, X_selected)
+
+    print(f"Decision tree: {model} vs no {model}")
+    print("Mean accuracy:", scores.mean())
+
     return
 
 

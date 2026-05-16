@@ -1,9 +1,11 @@
 # ================================================================
 # 0. Section: IMPORTS
 # ================================================================
+import numpy as np
+
 from dataclasses import dataclass
 
-from .Code import Code
+from .ClassifierEstimator import ClassifierEstimator
 
 
 
@@ -11,17 +13,10 @@ from .Code import Code
 # 1. Section: Functions
 # ================================================================
 @dataclass
-class PhaseCode(Code):
-    pass
-
-@dataclass
-class ArmCode(Code):
-    pass
-
-@dataclass
-class TrialCode(Code):
-    pass
-
-@dataclass
-class MovementCode(Code):
-    pass
+class TrainingResults:
+    model_name: str
+    target_name: str
+    estimator: ClassifierEstimator
+    scores: np.ndarray
+    mean_score: float
+    std_score: float

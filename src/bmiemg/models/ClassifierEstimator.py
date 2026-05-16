@@ -1,27 +1,21 @@
 # ================================================================
 # 0. Section: IMPORTS
 # ================================================================
-from dataclasses import dataclass
+from __future__ import annotations
 
-from .Code import Code
+import numpy as np
+
+from typing import Protocol, Self
 
 
 
 # ================================================================
 # 1. Section: Functions
 # ================================================================
-@dataclass
-class PhaseCode(Code):
-    pass
-
-@dataclass
-class ArmCode(Code):
-    pass
-
-@dataclass
-class TrialCode(Code):
-    pass
-
-@dataclass
-class MovementCode(Code):
-    pass
+class ClassifierEstimator(Protocol):
+    def fit(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+    ) -> Self:
+        ...
