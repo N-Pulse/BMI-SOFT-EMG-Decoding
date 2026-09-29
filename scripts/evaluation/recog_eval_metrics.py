@@ -49,51 +49,33 @@ def print_gesture_matrices(truth: np.ndarray, predictions: np.ndarray) -> None:
 
 
 # ================================================================
-# 3. Count trials with one correct raw gesture and rho > 0.25
+# 3. Count trials where the predicted labels overlap the true gesture (rho > 0.25)
 # ================================================================
-# Turn successive non-rest predictions into gesture segments.
-# Require exactly one segment with the trial's true gesture.
-# Compare its time span with the XDF movement markers using rho.
+# Per test trial, A = truly labeled with the trial's gesture batches; B = predicted as that gesture batches. rho = 2*|A and B|/(|A|+|B|), so gaps flicker only lower rho.
 def raw_recognition_count(
     trials: list[Trial],
     test_trials: set[int],
     infos: list[BatchInfo],
     predictions: np.ndarray,
-    window_ms: int,
 ) -> int:
     recognized = 0
-    window_seconds = window_ms / 1000
 
     for trial in trials:
         if trial.number not in test_trials:
             continue
 
-        segments = []
-        previous = "noGesture"
-        for info, prediction in zip(infos, predictions):
-            if info.trial != trial.number:
-                continue
-            if prediction != "noGesture":
-                if prediction != previous:
-                    segments.append([prediction, info.time, info.time + window_seconds])
-                else:
-                    segments[-1][2] = info.time + window_seconds
-            previous = prediction
+        pairs = [
+            (info.truth == trial.label, prediction == trial.label) 
+            for info, prediction in zip(infos, predictions)
+            if info.trial == trial.number
+        ]
+        true_count = sum(true for true, _ in pairs)
+        predicted_count = sum(predicted for _, predicted in pairs)
+        both = sum(true and predicted for true, predicted in pairs)
 
-        if len(segments) != 1 or segments[0][0] != trial.label:
-            continue
-
-        _, predicted_start, predicted_end = segments[0]
-        overlap = max(
-            0.0,
-            min(trial.end, predicted_end) - max(trial.start, predicted_start),
-        )
-        rho = 2 * overlap / (
-            (trial.end - trial.start) + (predicted_end - predicted_start)
-        )
-        if rho > 0.25:
+        if true_count + predicted_count and 2*both/(true_count + predicted_count) > 0.25:
             recognized += 1
-
+    
     return recognized
 
 
@@ -120,7 +102,7 @@ def report_predictions(
     rest = truth == "noGesture"
     false_gesture_rate = np.mean(scored_predictions[rest] != "noGesture")
     recognized = raw_recognition_count(
-        trials, test_trials, infos, predictions, window_ms
+        trials, test_trials, infos, predictions
     )
 
     print(f"\n{mode}: {len(infos)} test batches ({len(truth)} labeled)")
