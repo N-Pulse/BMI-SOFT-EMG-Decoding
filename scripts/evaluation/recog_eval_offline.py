@@ -45,8 +45,8 @@ def model_contract(window_ms: int, sfreq: float, classes: list[str],
 # Require gestures and noGesture; save the model if requested.
 def get_model(train_batches, train_infos, sfreq, window_ms, train_per_code,
               model_path, save_model):
-    labeled = np.asarray([info.truth is not None for info in train_infos])
-    labels = np.asarray([info.truth for info in train_infos if info.truth is not None])
+    labeled = np.asarray([info.clean for info in train_infos])
+    labels = np.asarray([info.truth for info in train_infos if info.clean])
     classes = sorted(set(labels))
     if len(classes) < 2 or "noGesture" not in classes:
         raise ValueError("Training split must contain gestures and noGesture")

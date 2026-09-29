@@ -65,7 +65,7 @@ def raw_recognition_count(
             continue
 
         pairs = [
-            (info.truth == trial.label, prediction == trial.label) 
+            (info.phase == "movement", prediction == trial.label)
             for info, prediction in zip(infos, predictions)
             if info.trial == trial.number
         ]
@@ -94,9 +94,10 @@ def report_predictions(
     predictions: np.ndarray,
     window_ms: int,
 ) -> dict:
-    scored = np.asarray([info.truth is not None for info in infos])
-    truth = np.asarray([info.truth for info in infos if info.truth is not None])
-    scored_predictions = predictions[scored]
+    clean = np.asarray([info.clean for info in infos])
+    all_truth = np.asarray([info.truth for info in infos])
+    truth = all_truth[clean]
+    scored_predictions = predictions[clean]
     classes = sorted(set(truth) | set(predictions))
     accuracy = accuracy_score(truth, scored_predictions)
     rest = truth == "noGesture"
@@ -112,6 +113,11 @@ def report_predictions(
     print(confusion_matrix(truth, scored_predictions, labels=classes))
     print_gesture_matrices(truth, scored_predictions)
     print(f"\nFalse-gesture rate during labeled rest: {false_gesture_rate:.1%}")
+    all_rest = all_truth == "noGesture"
+    print(f"With transitions ({len(infos)} batches): "
+          f"accuracy {accuracy_score(all_truth, predictions):.1%}, "
+          f"false-gesture rate {np.mean(predictions[all_rest] != "noGesture"):.1%}"
+          )
     print(f"Raw temporal recognition: {recognized}/{len(test_trials)} trials")
 
     return {
