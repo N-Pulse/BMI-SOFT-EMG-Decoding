@@ -61,6 +61,8 @@ def get_model(train_batches, train_infos, sfreq, window_ms, train_per_code,
     features = get_emg_features(train_batches[labeled], sfreq, TIME_FEATURES, [])
     model = DecisionTreeFactory(random_state=42).create()
     model.fit(features, labels)
+    print(f"Training accuracy: {model.score(features,labels):.1%} "
+          f"(depth {model.get_depth()}, {model.get_n_leaves()} leaves)")
     if save_model is not None:
         joblib.dump({"model": model, "contract": contract}, save_model)
     return model
