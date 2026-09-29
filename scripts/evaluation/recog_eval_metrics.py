@@ -78,6 +78,29 @@ def raw_recognition_count(
     
     return recognized
 
+# ================================================================
+# 3a. Count how often the prediction flips inside each true gesture
+# ================================================================
+# Per test trial, take the predictions of its movement batches in time order.
+# Count label changes between consecutive batches and divide by the time spanned.
+# Return the median over trials in flips per second; lower means a steadier prediction.
+def prediction_flips_per_second(
+    test_trials: set[int],
+    infos: list[BatchInfo],
+    predictions: np.ndarray,
+) -> float:
+    rates = []
+    for trial in sorted(test_trials):
+        moving = [
+            (info.time, prediction)
+            for info, prediction in zip(infos, predictions)
+            if info.trial == trial and info.phase == "movement"
+        ]
+        if len(moving) < 2:
+            continue
+        flips = sum(a[1] != b[1] for a, b in zip(moving, moving[1:]))
+        rates.append(flips / (moving[-1][0] - moving[0][0]))
+    return float(np.median(rates)) if rates else float("nan")
 
 # ================================================================
 # 4. Report classification and raw recognition for one mode
@@ -105,6 +128,7 @@ def report_predictions(
     recognized = raw_recognition_count(
         trials, test_trials, infos, predictions
     )
+    flips = prediction_flips_per_second(test_trials, infos, predictions)
 
     print(f"\n{mode}: {len(infos)} test batches ({len(truth)} labeled)")
     print(f"Classification accuracy: {accuracy:.1%}")
@@ -119,10 +143,12 @@ def report_predictions(
           f"false-gesture rate {np.mean(predictions[all_rest] != "noGesture"):.1%}"
           )
     print(f"Raw temporal recognition: {recognized}/{len(test_trials)} trials")
+    print(f"Prediction flips inside a gesture: {flips:.1f} per second (median over trials)")
 
     return {
         "labeled_batches": len(truth),
         "classification": accuracy,
         "recognition": recognized / len(test_trials),
         "false_gesture": false_gesture_rate,
+        "flips_per_second": flips,
     }

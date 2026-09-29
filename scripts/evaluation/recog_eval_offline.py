@@ -133,7 +133,7 @@ def evaluate(
         del batches, features
 
     print("\nComparison (raw predictions, no post-processing):")
-    print(f"{'Mode':<16} {'Step':>7} {'Labeled':>8} {'Classification':>15} {'Recognition':>13} {'False gesture':>14}")
+    print(f"{'Mode':<16} {'Step':>7} {'Labeled':>8} {'Classification':>15} {'Recognition':>13} {'False gesture':>14} {'Flips/s':>9}")
     for mode_name, step_ms in modes:
         result = results[mode_name]
         print(
@@ -141,7 +141,8 @@ def evaluate(
             f"{result['labeled_batches']:>8} "
             f"{result['classification']:>14.1%} "
             f"{result['recognition']:>13.1%} "
-            f"{result['false_gesture']:>14.1%}"
+            f"{result['false_gesture']:>14.1%} "
+            f"{result['flips_per_second']:>9.1f}"
         )
     print("Recognition uses XDF move/return markers, not manual EMG onset labels.")
     print("Overlapping batches are correlated; their counts are not independent samples.")
