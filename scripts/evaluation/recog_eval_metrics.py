@@ -49,53 +49,58 @@ def print_gesture_matrices(truth: np.ndarray, predictions: np.ndarray) -> None:
 
 
 # ================================================================
-# 3. Count trials with one correct raw gesture and rho > 0.25
+# 3. Count trials where the predicted labels overlap the true gesture (rho > 0.25)
 # ================================================================
-# Turn successive non-rest predictions into gesture segments.
-# Require exactly one segment with the trial's true gesture.
-# Compare its time span with the XDF movement markers using rho.
+# Per test trial, A = truly labeled with the trial's gesture batches; B = predicted as that gesture batches. rho = 2*|A and B|/(|A|+|B|), so gaps flicker only lower rho.
 def raw_recognition_count(
     trials: list[Trial],
     test_trials: set[int],
     infos: list[BatchInfo],
     predictions: np.ndarray,
-    window_ms: int,
 ) -> int:
     recognized = 0
-    window_seconds = window_ms / 1000
 
     for trial in trials:
         if trial.number not in test_trials:
             continue
 
-        segments = []
-        previous = "noGesture"
-        for info, prediction in zip(infos, predictions):
-            if info.trial != trial.number:
-                continue
-            if prediction != "noGesture":
-                if prediction != previous:
-                    segments.append([prediction, info.time, info.time + window_seconds])
-                else:
-                    segments[-1][2] = info.time + window_seconds
-            previous = prediction
+        pairs = [
+            (info.phase == "movement", prediction == trial.label)
+            for info, prediction in zip(infos, predictions)
+            if info.trial == trial.number
+        ]
+        true_count = sum(true for true, _ in pairs)
+        predicted_count = sum(predicted for _, predicted in pairs)
+        both = sum(true and predicted for true, predicted in pairs)
 
-        if len(segments) != 1 or segments[0][0] != trial.label:
-            continue
-
-        _, predicted_start, predicted_end = segments[0]
-        overlap = max(
-            0.0,
-            min(trial.end, predicted_end) - max(trial.start, predicted_start),
-        )
-        rho = 2 * overlap / (
-            (trial.end - trial.start) + (predicted_end - predicted_start)
-        )
-        if rho > 0.25:
+        if true_count + predicted_count and 2*both/(true_count + predicted_count) > 0.25:
             recognized += 1
-
+    
     return recognized
 
+# ================================================================
+# 3a. Count how often the prediction flips inside each true gesture
+# ================================================================
+# Per test trial, take the predictions of its movement batches in time order.
+# Count label changes between consecutive batches and divide by the time spanned.
+# Return the median over trials in flips per second; lower means a steadier prediction.
+def prediction_flips_per_second(
+    test_trials: set[int],
+    infos: list[BatchInfo],
+    predictions: np.ndarray,
+) -> float:
+    rates = []
+    for trial in sorted(test_trials):
+        moving = [
+            (info.time, prediction)
+            for info, prediction in zip(infos, predictions)
+            if info.trial == trial and info.phase == "movement"
+        ]
+        if len(moving) < 2:
+            continue
+        flips = sum(a[1] != b[1] for a, b in zip(moving, moving[1:]))
+        rates.append(flips / (moving[-1][0] - moving[0][0]))
+    return float(np.median(rates)) if rates else float("nan")
 
 # ================================================================
 # 4. Report classification and raw recognition for one mode
@@ -112,16 +117,18 @@ def report_predictions(
     predictions: np.ndarray,
     window_ms: int,
 ) -> dict:
-    scored = np.asarray([info.truth is not None for info in infos])
-    truth = np.asarray([info.truth for info in infos if info.truth is not None])
-    scored_predictions = predictions[scored]
+    clean = np.asarray([info.clean for info in infos])
+    all_truth = np.asarray([info.truth for info in infos])
+    truth = all_truth[clean]
+    scored_predictions = predictions[clean]
     classes = sorted(set(truth) | set(predictions))
     accuracy = accuracy_score(truth, scored_predictions)
     rest = truth == "noGesture"
     false_gesture_rate = np.mean(scored_predictions[rest] != "noGesture")
     recognized = raw_recognition_count(
-        trials, test_trials, infos, predictions, window_ms
+        trials, test_trials, infos, predictions
     )
+    flips = prediction_flips_per_second(test_trials, infos, predictions)
 
     print(f"\n{mode}: {len(infos)} test batches ({len(truth)} labeled)")
     print(f"Classification accuracy: {accuracy:.1%}")
@@ -130,11 +137,18 @@ def report_predictions(
     print(confusion_matrix(truth, scored_predictions, labels=classes))
     print_gesture_matrices(truth, scored_predictions)
     print(f"\nFalse-gesture rate during labeled rest: {false_gesture_rate:.1%}")
+    all_rest = all_truth == "noGesture"
+    print(f"With transitions ({len(infos)} batches): "
+          f"accuracy {accuracy_score(all_truth, predictions):.1%}, "
+          f"false-gesture rate {np.mean(predictions[all_rest] != "noGesture"):.1%}"
+          )
     print(f"Raw temporal recognition: {recognized}/{len(test_trials)} trials")
+    print(f"Prediction flips inside a gesture: {flips:.1f} per second (median over trials)")
 
     return {
         "labeled_batches": len(truth),
         "classification": accuracy,
         "recognition": recognized / len(test_trials),
         "false_gesture": false_gesture_rate,
+        "flips_per_second": flips,
     }

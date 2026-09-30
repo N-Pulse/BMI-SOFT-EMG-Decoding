@@ -23,10 +23,10 @@ TIME_FEATURES = [mav, std, maxav, rms, wl, ssc, log_det]
 # 1. Record the inputs needed to reuse a saved model
 # ================================================================
 # Save channels, feature order, window size, sampling rate,
-# classes, and train_per_code with the model.
+# classes, train_per_code, and max_depth with the model.
 # Check these settings when loading to avoid mismatched inputs.
 def model_contract(window_ms: int, sfreq: float, classes: list[str],
-                   train_per_code: int) -> dict:
+                   train_per_code: int, max_depth: int | None) -> dict:
     return {
         "channels": CHANNELS,
         "features": tuple(feature.__name__ for feature in TIME_FEATURES),
@@ -34,6 +34,7 @@ def model_contract(window_ms: int, sfreq: float, classes: list[str],
         "sfreq": sfreq,
         "classes": tuple(classes),
         "train_per_code": train_per_code,
+        "max_depth": max_depth,
     }
 
 # ================================================================
@@ -44,13 +45,13 @@ def model_contract(window_ms: int, sfreq: float, classes: list[str],
 # batches and train a decision tree with random_state=42.
 # Require gestures and noGesture; save the model if requested.
 def get_model(train_batches, train_infos, sfreq, window_ms, train_per_code,
-              model_path, save_model):
-    labeled = np.asarray([info.truth is not None for info in train_infos])
-    labels = np.asarray([info.truth for info in train_infos if info.truth is not None])
+              model_path, save_model, max_depth=None):
+    labeled = np.asarray([info.clean for info in train_infos])
+    labels = np.asarray([info.truth for info in train_infos if info.clean])
     classes = sorted(set(labels))
     if len(classes) < 2 or "noGesture" not in classes:
         raise ValueError("Training split must contain gestures and noGesture")
-    contract = model_contract(window_ms, sfreq, classes, train_per_code)
+    contract = model_contract(window_ms, sfreq, classes, train_per_code, max_depth)
 
     if model_path is not None:
         artifact = joblib.load(model_path)  # Only load trusted model files.
@@ -59,8 +60,10 @@ def get_model(train_batches, train_infos, sfreq, window_ms, train_per_code,
         return artifact["model"]
 
     features = get_emg_features(train_batches[labeled], sfreq, TIME_FEATURES, [])
-    model = DecisionTreeFactory(random_state=42).create()
+    model = DecisionTreeFactory(random_state=42, max_depth=max_depth).create()
     model.fit(features, labels)
+    print(f"Training accuracy: {model.score(features,labels):.1%} "
+          f"(depth {model.get_depth()}, {model.get_n_leaves()} leaves)")
     if save_model is not None:
         joblib.dump({"model": model, "contract": contract}, save_model)
     return model
@@ -82,6 +85,7 @@ def evaluate(
     model_path: Path | None = None,
     save_model: Path | None = None,
     csv_path: Path | None = None,
+    max_depth: int | None = None,
 ) -> None:
     if not xdf.is_file():
         raise FileNotFoundError(xdf)
@@ -97,7 +101,7 @@ def evaluate(
     )
     model = get_model(
         train_batches, train_infos, sfreq, window_ms, train_per_code,
-        model_path, save_model,
+        model_path, save_model, max_depth,
     )
     del train_batches
 
@@ -129,7 +133,7 @@ def evaluate(
         del batches, features
 
     print("\nComparison (raw predictions, no post-processing):")
-    print(f"{'Mode':<16} {'Step':>7} {'Labeled':>8} {'Classification':>15} {'Recognition':>13} {'False gesture':>14}")
+    print(f"{'Mode':<16} {'Step':>7} {'Labeled':>8} {'Classification':>15} {'Recognition':>13} {'False gesture':>14} {'Flips/s':>9}")
     for mode_name, step_ms in modes:
         result = results[mode_name]
         print(
@@ -137,7 +141,8 @@ def evaluate(
             f"{result['labeled_batches']:>8} "
             f"{result['classification']:>14.1%} "
             f"{result['recognition']:>13.1%} "
-            f"{result['false_gesture']:>14.1%}"
+            f"{result['false_gesture']:>14.1%} "
+            f"{result['flips_per_second']:>9.1f}"
         )
     print("Recognition uses XDF move/return markers, not manual EMG onset labels.")
     print("Overlapping batches are correlated; their counts are not independent samples.")
@@ -157,6 +162,7 @@ def main() -> None:
     parser.add_argument("--overlap-step-ms", type=int, default=20)
     parser.add_argument("--mode", choices=("both", "non-overlap", "overlap"), default="both")
     parser.add_argument("--train-per-code", type=int, default=4)
+    parser.add_argument("--max-depth", type=int, default=None, help="Limit the tree depth (default: no limit)")
     parser.add_argument("--model", type=Path, help="Load a trusted model saved by this script")
     parser.add_argument("--save-model", type=Path, help="Save the newly trained model")
     parser.add_argument("--csv", type=Path, help="Save test predictions from both modes")
@@ -166,6 +172,7 @@ def main() -> None:
     evaluate(
         args.xdf, args.window_ms, args.overlap_step_ms, args.mode,
         args.train_per_code, args.model, args.save_model, args.csv,
+        max_depth=args.max_depth,
     )
 
 

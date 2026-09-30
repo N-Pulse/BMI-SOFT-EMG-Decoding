@@ -28,7 +28,8 @@ class BatchInfo:
     time: float
     trial: int
     phase: str
-    truth: str | None
+    truth: str 
+    clean: bool
 
 
 # ================================================================
@@ -178,10 +179,9 @@ def load_recording(path: Path):
 # ================================================================
 # 6. Make fixed-size batches with or without overlap
 # ================================================================
-# Convert window and step durations from milliseconds to samples.
-# A full-window step gives no overlap; a smaller step overlaps.
-# Label only batches fully inside movement or known rest.
-# Keep other batches for raw temporal recognition.
+# Convert window and step from milliseconds to samples; a full-window step means no overlap.
+# Label each batch by the phase covering most of it (prep = noGesture, return = gesture).
+# Mark batches fully inside movement or rest as clean.
 def make_batches(
     emg_volts: np.ndarray,
     timestamps: np.ndarray,
@@ -206,19 +206,28 @@ def make_batches(
         if trial.number not in selected_trials:
             continue
         trial_end, rest = bounds[trial.number]
+        iti_start = rest[0] if rest else trial_end
+        spans = [
+            ("prep", trial.prep_start, trial.start, "noGesture"),
+            ("movement", trial.start, trial.end, trial.label),
+            ("return", trial.end, iti_start, trial.label),
+            ]
+        if rest:
+            spans.append(("rest", rest[0], rest[1], "noGesture"))
+        
         first = int(np.searchsorted(timestamps, trial.prep_start, side="left"))
         last = int(np.searchsorted(timestamps, trial_end, side="left"))
         for offset in range(first, last - window_samples + 1, step_samples):
             batch_start = float(timestamps[offset])
             batch_end = float(timestamps[offset + window_samples - 1] + 1 / sfreq)
-            if batch_start >= trial.start and batch_end <= trial.end:
-                phase, truth = "movement", trial.label
-            elif rest and batch_start >= rest[0] and batch_end <= rest[1]:
-                phase, truth = "rest", "noGesture"
-            else:
-                phase, truth = "unlabeled", None
+            overlaps = [min(batch_end, end) - max(batch_start, start)
+                        for _, start, end, _ in spans]
+            phase, _, _, truth = spans[int(np.argmax(overlaps))]
+            clean = (batch_start >= trial.start and batch_end <= trial.end) or bool(
+                rest and batch_start >= rest[0] and batch_end <= rest[1]
+            )
             batches.append(emg_volts[offset : offset + window_samples].T)
-            infos.append(BatchInfo(batch_start, trial.number, phase, truth))
+            infos.append(BatchInfo(batch_start, trial.number, phase, truth, clean))
 
     if not batches:
         raise ValueError("No complete batches were found")
