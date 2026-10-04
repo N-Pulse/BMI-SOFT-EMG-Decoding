@@ -34,6 +34,10 @@ packages = [{include = "bmiemg", from = "src"}]
 [tool.classpy]
 puml = "docs/diagrams/class.puml"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"

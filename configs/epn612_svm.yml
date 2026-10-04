@@ -1,0 +1,37 @@
+data:
+  # This directory must directly contain trainingJSON/ and testingJSON/.
+  root: "./data/raw/emg_epn_612/EMG-EPN612 Dataset/EMG-EPN612 Dataset"
+  # trainingJSON has labels in both sections and is the development dataset.
+  json_group: "trainingJSON"
+  train_section: "trainingSamples"
+  test_section: "testingSamples"
+  # Use an integer for a quick experiment, or null for the complete dataset.
+  max_users: null
+
+processing:
+  expected_sampling_rate_hz: 200.0
+  window_size_ms: 200.0
+  window_step_ms: 100.0
+  # Avoid allowing long noGesture trials to dominate the classifier.
+  max_windows_per_trial: 10
+  software_filter:
+    enabled: true
+    low_hz: 20.0
+    # The board's 500 Hz upper cutoff is above this dataset's 100 Hz Nyquist
+    # frequency and therefore cannot be recreated from EMG-EPN-612.
+    high_hz: null
+    order: 1
+    production_analog_bandpass_hz: [20.0, 500.0]
+  features: ["mav", "rms", "wl", "zc", "ssc"]
+
+model:
+  C: 1.0
+  class_weight: "balanced"
+  max_iter: 10000
+  random_state: 42
+
+output:
+  directory: "./results/epn612_svm"
+  model_filename: "emg_svm.joblib"
+  metrics_filename: "metrics.json"
+  confusion_matrix_filename: "confusion_matrix.csv"
