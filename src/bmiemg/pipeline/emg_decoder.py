@@ -35,9 +35,7 @@ class EMGSVMDecoder:
         features = extract_emg_features(windows, self.processing)
         return self.fit_features(features, labels)
 
-    def fit_features(
-        self, features: np.ndarray, labels: np.ndarray
-    ) -> "EMGSVMDecoder":
+    def fit_features(self, features: np.ndarray, labels: np.ndarray) -> "EMGSVMDecoder":
         """Fit precomputed features, used by memory-efficient offline training."""
 
         feature_array = self._validate_features(features)
@@ -64,6 +62,19 @@ class EMGSVMDecoder:
         if predictions.shape != (1,):
             raise RuntimeError("predict_one received more than one window")
         return str(predictions[0])
+
+    def feature_importances(self) -> np.ndarray:
+        """Return mean absolute linear coefficients on standardized features."""
+
+        classifier = self._fitted().steps[-1][1]
+        if not hasattr(classifier, "coef_"):
+            raise TypeError("The fitted classifier does not expose linear coefficients")
+        coefficients = np.asarray(classifier.coef_, dtype=np.float64)
+        if coefficients.ndim == 1:
+            coefficients = coefficients[np.newaxis, :]
+        if coefficients.ndim != 2 or coefficients.shape[1] != len(self.feature_names):
+            raise RuntimeError("Classifier coefficients do not match decoder features")
+        return np.mean(np.abs(coefficients), axis=0)
 
     def save(self, path: str | Path) -> Path:
         self._fitted()
@@ -123,7 +134,9 @@ class OnlineEMGInference:
         if array.ndim == 1:
             array = array[:, np.newaxis]
         if array.ndim != 2 or array.shape[0] != 8:
-            raise ValueError(f"Expected online samples shaped (8, n), got {array.shape}")
+            raise ValueError(
+                f"Expected online samples shaped (8, n), got {array.shape}"
+            )
         if not np.isfinite(array).all():
             raise ValueError("Online samples contain non-finite values")
 

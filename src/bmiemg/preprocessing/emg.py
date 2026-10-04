@@ -10,19 +10,22 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.signal import butter, sosfilt
 
-from .list_features import mav, rms, ssc, wl, zc
-
+from .list_features import FREQ_FEATURE_FUNCTIONS, TIME_FEATURE_FUNCTIONS
 
 FloatArray: TypeAlias = NDArray[np.float32]
-FeatureFunction: TypeAlias = Callable[[np.ndarray], np.ndarray]
+FeatureFunction: TypeAlias = Callable[..., np.ndarray]
 
-FEATURE_FUNCTIONS: Mapping[str, FeatureFunction] = {
-    "mav": mav,
-    "rms": rms,
-    "wl": wl,
-    "zc": zc,
-    "ssc": ssc,
+TIME_FEATURES: Mapping[str, FeatureFunction] = {
+    function.__name__: function for function in TIME_FEATURE_FUNCTIONS
 }
+FREQUENCY_FEATURES: Mapping[str, FeatureFunction] = {
+    function.__name__: function for function in FREQ_FEATURE_FUNCTIONS
+}
+FEATURE_FUNCTIONS: Mapping[str, FeatureFunction] = {
+    **TIME_FEATURES,
+    **FREQUENCY_FEATURES,
+}
+ALL_FEATURE_NAMES: tuple[str, ...] = tuple(FEATURE_FUNCTIONS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,15 +81,15 @@ def validate_emg_windows(
         array = array[np.newaxis, ...]
     expected = (config.channel_count, config.window_size_samples)
     if array.ndim != 3 or array.shape[1:] != expected or array.shape[0] == 0:
-        raise ValueError(f"Expected (n_windows, {expected[0]}, {expected[1]}), got {array.shape}")
+        raise ValueError(
+            f"Expected (n_windows, {expected[0]}, {expected[1]}), got {array.shape}"
+        )
     if not np.isfinite(array).all():
         raise ValueError("EMG contains NaN or infinite values")
     return array
 
 
-def filter_emg_windows(
-    windows: np.ndarray, config: EMGProcessingConfig
-) -> FloatArray:
+def filter_emg_windows(windows: np.ndarray, config: EMGProcessingConfig) -> FloatArray:
     """Apply a causal filter which can also be used on online windows.
 
     EMG-EPN-612 is sampled at 200 Hz, so it cannot represent the production
@@ -121,7 +124,13 @@ def extract_emg_features(
     """Produce feature-major, then channel-major scalar model inputs."""
 
     filtered = filter_emg_windows(windows, config)
-    blocks = [FEATURE_FUNCTIONS[name](filtered) for name in config.feature_names]
+    blocks = []
+    for name in config.feature_names:
+        function = FEATURE_FUNCTIONS[name]
+        if name in FREQUENCY_FEATURES:
+            blocks.append(function(filtered, config.sampling_rate_hz))
+        else:
+            blocks.append(function(filtered))
     features = np.concatenate(blocks, axis=1)
     if not np.isfinite(features).all():
         raise ValueError("Feature extraction produced non-finite values")

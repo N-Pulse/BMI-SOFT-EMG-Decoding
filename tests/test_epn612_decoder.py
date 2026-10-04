@@ -40,3 +40,13 @@ def test_online_buffer_emits_at_window_then_step():
 
     assert len(first) == 1
     assert len(second) == 1
+
+
+def test_linear_svm_feature_importances_match_model_inputs():
+    decoder = _decoder()
+
+    importances = decoder.feature_importances()
+
+    assert importances.shape == (len(decoder.feature_names),)
+    assert np.isfinite(importances).all()
+    assert np.all(importances >= 0)

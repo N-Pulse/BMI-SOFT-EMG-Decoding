@@ -73,6 +73,10 @@ def test_complete_training_pipeline_writes_artifacts(tmp_path):
             "model_filename": "model.joblib",
             "metrics_filename": "metrics.json",
             "confusion_matrix_filename": "confusion.csv",
+            "feature_importance_filename": "feature_importance.csv",
+            "feature_type_importance_filename": "feature_type_importance.csv",
+            "feature_importance_plot_filename": "feature_importance.png",
+            "feature_type_importance_plot_filename": "feature_type_importance.png",
         },
     }
 
@@ -82,3 +86,7 @@ def test_complete_training_pipeline_writes_artifacts(tmp_path):
     assert (output / "model.joblib").is_file()
     assert (output / "metrics.json").is_file()
     assert (output / "confusion.csv").is_file()
+    assert (output / "feature_importance.csv").is_file()
+    assert (output / "feature_type_importance.csv").is_file()
+    assert (output / "feature_importance.png").is_file()
+    assert (output / "feature_type_importance.png").is_file()

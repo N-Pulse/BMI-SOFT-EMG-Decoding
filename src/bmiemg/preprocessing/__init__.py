@@ -2,6 +2,7 @@ from .filters import notch_filter, passband_filter
 from .envelop import get_envelop
 from .list_features import TIME_FEATURE_FUNCTIONS, FREQ_FEATURE_FUNCTIONS
 from .emg import (
+    ALL_FEATURE_NAMES,
     EMGProcessingConfig,
     expanded_feature_names,
     extract_emg_features,
@@ -17,6 +18,7 @@ __all__ = [
     "get_envelop",
     "TIME_FEATURE_FUNCTIONS",
     "FREQ_FEATURE_FUNCTIONS",
+    "ALL_FEATURE_NAMES",
     "EMGProcessingConfig",
     "LabelledEMGWindow",
     "expanded_feature_names",

@@ -22,7 +22,31 @@ processing:
     high_hz: null
     order: 1
     production_analog_bandpass_hz: [20.0, 500.0]
-  features: ["mav", "rms", "wl", "zc", "ssc"]
+  features:
+    - mav
+    - std
+    - var
+    - maxav
+    - rms
+    - wl
+    - ssc
+    - zc
+    - log_det
+    - wamp
+    - iav
+    - ssi
+    - aac
+    - dasdv
+    - ptp_amp
+    - median_abs
+    - iqr
+    - myop
+    - hjorth_mobility
+    - hjorth_complexity
+    - total_power
+    - mean_freq
+    - median_freq
+    - peak_freq
 
 model:
   C: 1.0
@@ -35,3 +59,7 @@ output:
   model_filename: "emg_svm.joblib"
   metrics_filename: "metrics.json"
   confusion_matrix_filename: "confusion_matrix.csv"
+  feature_importance_filename: "feature_importance.csv"
+  feature_type_importance_filename: "feature_type_importance.csv"
+  feature_importance_plot_filename: "feature_importance.png"
+  feature_type_importance_plot_filename: "feature_type_importance.png"
