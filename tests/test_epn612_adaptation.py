@@ -2,18 +2,20 @@ import json
 
 import numpy as np
 
-from bmiemg.data.epn612 import (
+from scripts.epn612.adaptation import (
     BoardAdaptationConfig,
-    ParticipantSource,
-    SplitRecord,
     adapt_emg_to_board,
-    assign_participant_splits,
     board_counts_to_normalized,
-    build_split_records,
     iter_adapted_split,
     mimic_board_analog_filter,
     normalize_signed_adc,
     resample_emg,
+)
+from scripts.epn612.split import (
+    ParticipantSource,
+    SplitRecord,
+    assign_participant_splits,
+    build_split_records,
     summarize_split,
     write_split_manifest,
 )

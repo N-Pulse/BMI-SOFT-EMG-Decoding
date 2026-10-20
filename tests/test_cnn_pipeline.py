@@ -6,16 +6,16 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from bmiemg.data.epn612.loader import EMGTrial
-from epn612.adaptation import BoardAdaptationConfig
-from epn612.dataset import (
+from scripts.cnn.cnn import TCNN
+from scripts.cnn.train import checkpoint_path, parse_config
+from scripts.cnn.training import run_epoch, save_checkpoint
+from scripts.epn612.adaptation import BoardAdaptationConfig
+from scripts.epn612.dataset import (
     EPN612DatasetConfig,
     WindowConfig,
     extract_trial_windows,
     window_start_indices,
 )
-from cnn.cnn import TCNN
-from cnn.train import checkpoint_path, parse_config
-from cnn.training import run_epoch, save_checkpoint
 
 
 def test_window_starts_are_uniformly_limited():

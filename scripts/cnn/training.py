@@ -12,10 +12,7 @@ from torch import nn
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader, Dataset
 
-if __package__:  # Installed package or ``python -m cnn.train``.
-    from .cnn import TCNN
-else:  # Direct import while running ``python scripts/cnn/train.py``.
-    from cnn import TCNN
+from .cnn import TCNN
 
 
 @dataclass(frozen=True, slots=True)
