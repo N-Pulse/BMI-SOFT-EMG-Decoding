@@ -29,11 +29,7 @@ dependencies = [
 ]
 
 [tool.poetry]
-packages = [
-    {include = "bmiemg", from = "src"},
-    {include = "cnn", from = "scripts"},
-    {include = "epn612", from = "scripts"},
-]
+packages = [{include = "bmiemg", from = "src"}]
 
 [tool.classpy]
 puml = "docs/diagrams/class.puml"
@@ -41,6 +37,7 @@ puml = "docs/diagrams/class.puml"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+pythonpath = ["."]
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
