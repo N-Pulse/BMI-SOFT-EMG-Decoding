@@ -105,8 +105,9 @@ DEFAULT_CONFIG = ExperimentConfig(
     ),
     model=TCNNConfig(
         n_channels=8,
-        time_kernel=5,
-        pool_stride=1,
+        time_kernel=7,
+        temporal_strides=(2, 2, 1),
+        temporal_dilations=(1, 2, 4),
         n_filters=(32, 32, 64, 64),
     ),
     training=TrainingConfig(
@@ -130,7 +131,7 @@ def run_experiment(config: ExperimentConfig) -> Path:
     device = resolve_device(config.device)
     print(f"Device: {device}")
 
-    # 1. EPN-612 selection -> grouped splits -> windowing -> train-fit normalization.
+    # 1. EPN-612 selection -> grouped splits -> 2 kHz windows -> normalization.
     datasets = build_epn612_datasets(config.data, random_seed=config.random_seed)
     print("Dataset sizes:", datasets.sizes)
 
@@ -167,7 +168,7 @@ def run_experiment(config: ExperimentConfig) -> Path:
         model,
         destination,
         {
-            "format_version": 2,
+            "format_version": 3,
             "architecture": "TCNN",
             "model_config": asdict(config.model),
             "class_labels": datasets.class_labels,
@@ -218,13 +219,13 @@ def parse_config(argv: list[str] | None = None) -> ExperimentConfig:
         "--window-size",
         type=positive_int,
         default=DEFAULT_CONFIG.data.windows.size_samples,
-        help="Window length in adapted samples",
+        help="Window length in adapted 2 kHz samples",
     )
     parser.add_argument(
         "--window-step",
         type=positive_int,
         default=DEFAULT_CONFIG.data.windows.step_samples,
-        help="Step between windows in adapted samples",
+        help="Step between windows in adapted 2 kHz samples",
     )
     parser.add_argument(
         "--max-windows-per-trial",
@@ -289,7 +290,7 @@ def print_experiment(config: ExperimentConfig) -> None:
 
     stages = (
         "select participants and create data splits",
-        "adapt trials to the deployment board and extract labelled windows",
+        "adapt trials to the 2 kHz deployment input and extract labelled windows",
         "batch windows and construct TCNN",
         "train with Adam and cross-entropy",
         "evaluate the held-out test split",

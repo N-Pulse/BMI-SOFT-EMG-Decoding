@@ -18,7 +18,7 @@ from epn612.dataset import (
 from epn612.split import ParticipantSource, ParticipantSplits
 from cnn.cnn import TCNN
 from cnn.train import checkpoint_path, parse_config
-from cnn.training import run_epoch, save_checkpoint
+from cnn.training import TCNNConfig, build_tcnn, run_epoch, save_checkpoint
 
 
 def test_window_starts_are_uniformly_limited():
@@ -54,6 +54,29 @@ def test_trial_adaptation_and_windowing_are_encapsulated():
     assert len(windows) == 2
     assert all(window.shape == (8, 400) for window in windows)
     assert all(window.dtype == np.float32 for window in windows)
+
+
+def test_tcnn_temporal_receptive_field_covers_roughly_50_to_100_ms():
+    config = TCNNConfig(
+        time_kernel=7,
+        temporal_strides=(2, 2, 1),
+        temporal_dilations=(1, 2, 4),
+        n_filters=(2, 2, 2, 2),
+    )
+    model = build_tcnn(config, n_classes=6)
+    convolutions = [model.block2[0], model.block3[0], model.block4[0]]
+
+    assert config.temporal_receptive_field_samples == 127
+    assert 50 <= 1000 * config.temporal_receptive_field_samples / 2000 <= 100
+    assert [layer.stride for layer in convolutions] == [(2, 1), (2, 1), (1, 1)]
+    assert [layer.dilation for layer in convolutions] == [(1, 1), (2, 1), (4, 1)]
+    signals = torch.randn(3, 8, 400)
+    features = signals.transpose(1, 2).unsqueeze(1)
+    for block in (model.block1, model.block2, model.block3, model.block4):
+        features = block(features)
+
+    assert features.shape == (3, 2, 100, 1)
+    assert model(signals).shape == (3, 6)
 
 
 def test_single_participant_keeps_every_trials_windows_in_one_split(monkeypatch):
