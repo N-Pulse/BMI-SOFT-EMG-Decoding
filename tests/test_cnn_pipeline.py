@@ -10,9 +10,12 @@ from epn612.adaptation import BoardAdaptationConfig
 from epn612.dataset import (
     EPN612DatasetConfig,
     WindowConfig,
+    assign_trial_splits,
+    build_epn612_datasets,
     extract_trial_windows,
     window_start_indices,
 )
+from epn612.split import ParticipantSource, ParticipantSplits
 from cnn.cnn import TCNN
 from cnn.train import checkpoint_path, parse_config
 from cnn.training import run_epoch, save_checkpoint
@@ -51,6 +54,106 @@ def test_trial_adaptation_and_windowing_are_encapsulated():
     assert len(windows) == 2
     assert all(window.shape == (8, 400) for window in windows)
     assert all(window.dtype == np.float32 for window in windows)
+
+
+def test_single_participant_keeps_every_trials_windows_in_one_split(monkeypatch):
+    import epn612.dataset as dataset_module
+
+    source = ParticipantSource(
+        participant_id="trainingJSON:user1",
+        source_group="trainingJSON",
+        source_user_id="user1",
+        source_path=Path("user1.json"),
+    )
+    trials = [
+        EMGTrial(
+            emg=np.full((8, 20), index, dtype=np.float32),
+            sampling_rate_hz=200,
+            user_id="user1",
+            trial_id=f"idx_{index}",
+            dataset_section="trainingSamples",
+            gesture="fist" if index <= 6 else "open",
+            ground_truth=None,
+            ground_truth_index=None,
+            gesture_start=None,
+            source_path=source.source_path,
+        )
+        for index in range(1, 13)
+    ]
+    monkeypatch.setattr(
+        dataset_module,
+        "select_participant_splits",
+        lambda *args, **kwargs: ParticipantSplits(
+            (source,),
+            {source.participant_id: "all"},
+            ("all",),
+        ),
+    )
+    monkeypatch.setattr(
+        dataset_module, "load_user_trials", lambda *args, **kwargs: iter(trials)
+    )
+    monkeypatch.setattr(
+        dataset_module,
+        "extract_trial_windows",
+        lambda trial, config: [
+            np.full((8, 4), int(trial.trial_id.removeprefix("idx_")), dtype=np.float32),
+            np.full((8, 4), int(trial.trial_id.removeprefix("idx_")), dtype=np.float32),
+        ],
+    )
+    config = EPN612DatasetConfig(
+        root=Path("dataset"),
+        participant_id=source.participant_id,
+        split_ratios=(0.5, 0.25, 0.25),
+        class_labels=("fist", "open"),
+        windows=WindowConfig(size_samples=4, step_samples=2),
+    )
+
+    datasets = build_epn612_datasets(config, random_seed=42)
+
+    trial_ids_by_split = []
+    for dataset in (datasets.train, datasets.validation, datasets.test):
+        signals, _ = dataset.tensors
+        trial_ids = [int(value) for value in signals[:, 0, 0].tolist()]
+        assert all(trial_ids.count(trial_id) == 2 for trial_id in set(trial_ids))
+        trial_ids_by_split.append(set(trial_ids))
+    assert trial_ids_by_split[0].isdisjoint(trial_ids_by_split[1])
+    assert trial_ids_by_split[0].isdisjoint(trial_ids_by_split[2])
+    assert trial_ids_by_split[1].isdisjoint(trial_ids_by_split[2])
+
+
+def test_trial_split_is_reproducible_and_stratified():
+    trials = [
+        EMGTrial(
+            emg=np.zeros((8, 20), dtype=np.float32),
+            sampling_rate_hz=200,
+            user_id="user1",
+            trial_id=f"{gesture}_{index}",
+            dataset_section="trainingSamples",
+            gesture=gesture,
+            ground_truth=None,
+            ground_truth_index=None,
+            gesture_start=None,
+            source_path=Path("user1.json"),
+        )
+        for gesture in ("fist", "open")
+        for index in range(10)
+    ]
+    ratios = {"train": 0.7, "validation": 0.15, "test": 0.15}
+
+    first = assign_trial_splits(trials, ratios=ratios, random_seed=42)
+    second = assign_trial_splits(trials, ratios=ratios, random_seed=42)
+
+    assert first == second
+    for gesture in ("fist", "open"):
+        counts = {
+            split: sum(
+                first[trial.trial_id] == split
+                for trial in trials
+                if trial.gesture == gesture
+            )
+            for split in ratios
+        }
+        assert counts == {"train": 7, "validation": 2, "test": 1}
 
 
 def test_cli_overrides_preserve_the_rest_of_the_typed_config():

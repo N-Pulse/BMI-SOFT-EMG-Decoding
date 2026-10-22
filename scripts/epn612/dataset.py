@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeAlias
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset, TensorDataset, random_split
+from torch.utils.data import Dataset, TensorDataset
 
 from bmiemg.data.epn612.loader import EMGTrial, load_user_trials
 from bmiemg.preprocessing.segmentation import labelled_interval
@@ -21,6 +22,7 @@ from .adaptation import (
 from .split import MOVEMENTS, select_participant_splits
 
 WindowDataset: TypeAlias = Dataset[tuple[torch.Tensor, torch.Tensor]]
+DATASET_SPLIT_NAMES = ("train", "validation", "test")
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,42 +112,58 @@ def build_epn612_datasets(
         random_seed=random_seed,
     )
     label_to_index = {label: index for index, label in enumerate(config.class_labels)}
-    windows: dict[str, list[np.ndarray]] = {name: [] for name in selection.split_names}
-    labels: dict[str, list[int]] = {name: [] for name in selection.split_names}
+    windows: dict[str, list[np.ndarray]] = {name: [] for name in DATASET_SPLIT_NAMES}
+    labels: dict[str, list[int]] = {name: [] for name in DATASET_SPLIT_NAMES}
 
-    for participant in selection.participants:
-        split = selection.assignments[participant.participant_id]
-        for trial in load_user_trials(
-            participant.source_path,
-            section="trainingSamples",
-        ):
-            if trial.gesture not in label_to_index:
-                continue
-            for window in extract_trial_windows(trial, config):
-                windows[split].append(window)
-                labels[split].append(label_to_index[trial.gesture])
+    if config.participant_id is not None:
+        participant = selection.participants[0]
+        trials = [
+            trial
+            for trial in load_user_trials(
+                participant.source_path,
+                section="trainingSamples",
+            )
+            if trial.gesture in label_to_index
+        ]
+        trial_assignments = assign_trial_splits(
+            trials,
+            ratios=dict(zip(DATASET_SPLIT_NAMES, config.split_ratios, strict=True)),
+            random_seed=random_seed,
+        )
+        for trial in trials:
+            split = trial_assignments[trial.trial_id]
+            extracted = extract_trial_windows(trial, config)
+            windows[split].extend(extracted)
+            labels[split].extend([label_to_index[trial.gesture]] * len(extracted))
+    else:
+        participant_split_names = {
+            "train": "train",
+            "val": "validation",
+            "test": "test",
+        }
+        for participant in selection.participants:
+            split = participant_split_names[
+                selection.assignments[participant.participant_id]
+            ]
+            for trial in load_user_trials(
+                participant.source_path,
+                section="trainingSamples",
+            ):
+                if trial.gesture not in label_to_index:
+                    continue
+                extracted = extract_trial_windows(trial, config)
+                windows[split].extend(extracted)
+                labels[split].extend([label_to_index[trial.gesture]] * len(extracted))
 
     datasets = {
         split: _to_tensor_dataset(split, windows[split], labels[split])
-        for split in selection.split_names
+        for split in DATASET_SPLIT_NAMES
     }
-    if config.participant_id is not None:
-        train, validation, test = random_split(
-            datasets["all"],
-            config.split_ratios,
-            generator=torch.Generator().manual_seed(random_seed),
-        )
-    else:
-        train, validation, test = (
-            datasets["train"],
-            datasets["val"],
-            datasets["test"],
-        )
 
     result = DatasetSplits(
-        train,
-        validation,
-        test,
+        datasets["train"],
+        datasets["validation"],
+        datasets["test"],
         config.class_labels,
         len(selection.participants),
     )
@@ -156,6 +174,77 @@ def build_epn612_datasets(
             f"{', '.join(empty)}. Select more participants or extract more windows."
         )
     return result
+
+
+def assign_trial_splits(
+    trials: Iterable[EMGTrial],
+    *,
+    ratios: Mapping[str, float],
+    random_seed: int,
+) -> dict[str, str]:
+    """Assign complete trials to gesture-stratified dataset splits."""
+
+    if set(ratios) != set(DATASET_SPLIT_NAMES):
+        raise ValueError(f"Ratios must define exactly {DATASET_SPLIT_NAMES}")
+    ratio_values = tuple(ratios[name] for name in DATASET_SPLIT_NAMES)
+    if any(value < 0 for value in ratio_values) or not np.isclose(
+        sum(ratio_values), 1.0
+    ):
+        raise ValueError("Split ratios must be non-negative and sum to one")
+
+    trials_by_gesture: dict[str, list[str]] = {}
+    seen_trial_ids: set[str] = set()
+    for trial in trials:
+        if trial.gesture is None:
+            raise ValueError(f"Trial {trial.trial_id!r} has no gesture label")
+        if trial.trial_id in seen_trial_ids:
+            raise ValueError(f"Duplicate trial ID {trial.trial_id!r}")
+        seen_trial_ids.add(trial.trial_id)
+        trials_by_gesture.setdefault(trial.gesture, []).append(trial.trial_id)
+
+    rng = np.random.default_rng(random_seed)
+    assignments: dict[str, str] = {}
+    for gesture in sorted(trials_by_gesture):
+        trial_ids = trials_by_gesture[gesture]
+        shuffled = [trial_ids[index] for index in rng.permutation(len(trial_ids))]
+        counts = _stratified_split_counts(len(shuffled), ratio_values)
+        offset = 0
+        for split, count in zip(DATASET_SPLIT_NAMES, counts, strict=True):
+            for trial_id in shuffled[offset : offset + count]:
+                assignments[trial_id] = split
+            offset += count
+    return assignments
+
+
+def _stratified_split_counts(
+    total: int,
+    ratios: tuple[float, float, float],
+) -> tuple[int, int, int]:
+    positive = [index for index, ratio in enumerate(ratios) if ratio > 0]
+    base = [0, 0, 0]
+    if total >= len(positive):
+        for index in positive:
+            base[index] = 1
+
+    remaining = total - sum(base)
+    weights = [
+        max(total * ratio - base[index], 0.0) for index, ratio in enumerate(ratios)
+    ]
+    if remaining and not any(weights):
+        weights = list(ratios)
+    weight_total = sum(weights)
+    exact = [
+        remaining * weight / weight_total if weight_total else 0.0 for weight in weights
+    ]
+    additional = [int(np.floor(value)) for value in exact]
+    remainder = remaining - sum(additional)
+    order = sorted(
+        range(len(ratios)),
+        key=lambda index: (-(exact[index] - additional[index]), index),
+    )
+    for index in order[:remainder]:
+        additional[index] += 1
+    return tuple(base[index] + additional[index] for index in range(3))
 
 
 def extract_trial_windows(

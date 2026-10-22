@@ -130,7 +130,7 @@ def run_experiment(config: ExperimentConfig) -> Path:
     device = resolve_device(config.device)
     print(f"Device: {device}")
 
-    # 1. EPN-612 selection -> board adaptation -> windowing -> data splits.
+    # 1. EPN-612 selection -> grouped data splits -> adaptation and windowing.
     datasets = build_epn612_datasets(config.data, random_seed=config.random_seed)
     print("Dataset sizes:", datasets.sizes)
 
