@@ -5,10 +5,13 @@ import numpy as np
 from bmiemg.data.epn612 import EMGTrial
 from bmiemg.preprocessing import (
     ALL_FEATURE_NAMES,
+    ChannelNormalizationStats,
     EMGProcessingConfig,
     expanded_feature_names,
     extract_emg_features,
+    fit_channel_normalization,
     iter_trial_windows,
+    normalize_emg_channels,
 )
 
 
@@ -71,3 +74,34 @@ def test_all_scalar_features_are_finite_and_expand_per_channel():
     assert features.shape == (2, 24 * 8)
     assert np.isfinite(features).all()
     assert expanded_feature_names(config)[-1] == "peak_freq_ch8"
+
+
+def test_channel_normalization_is_fitted_per_channel():
+    training = np.array(
+        [
+            [[0, 2], [10, 14]],
+            [[2, 4], [14, 18]],
+        ],
+        dtype=np.float32,
+    )
+
+    stats = fit_channel_normalization(training, epsilon=1e-6)
+    normalized = normalize_emg_channels(training, stats)
+
+    np.testing.assert_allclose(stats.mean, [2, 14])
+    np.testing.assert_allclose(stats.standard_deviation, [np.sqrt(2), np.sqrt(8)])
+    np.testing.assert_allclose(normalized.mean(axis=(0, 2)), 0, atol=1e-6)
+    np.testing.assert_allclose(normalized.std(axis=(0, 2)), 1, atol=1e-5)
+
+
+def test_saved_training_statistics_are_reused_for_new_windows():
+    stats = ChannelNormalizationStats(
+        mean=(1.0, 10.0),
+        standard_deviation=(2.0, 5.0),
+        epsilon=1e-6,
+    )
+    unseen = np.array([[3.0, -1.0], [15.0, 5.0]], dtype=np.float32)
+
+    normalized = normalize_emg_channels(unseen, stats)
+
+    np.testing.assert_allclose(normalized, [[1.0, -1.0], [1.0, -1.0]], atol=1e-6)

@@ -130,7 +130,7 @@ def run_experiment(config: ExperimentConfig) -> Path:
     device = resolve_device(config.device)
     print(f"Device: {device}")
 
-    # 1. EPN-612 selection -> grouped data splits -> adaptation and windowing.
+    # 1. EPN-612 selection -> grouped splits -> windowing -> train-fit normalization.
     datasets = build_epn612_datasets(config.data, random_seed=config.random_seed)
     print("Dataset sizes:", datasets.sizes)
 
@@ -167,7 +167,7 @@ def run_experiment(config: ExperimentConfig) -> Path:
         model,
         destination,
         {
-            "format_version": 1,
+            "format_version": 2,
             "architecture": "TCNN",
             "model_config": asdict(config.model),
             "class_labels": datasets.class_labels,
@@ -179,6 +179,10 @@ def run_experiment(config: ExperimentConfig) -> Path:
                 ),
                 "dtype": "float32",
                 "sampling_rate_hz": config.data.adaptation.target_sampling_rate_hz,
+                "normalization": {
+                    "type": "per_channel_standardization",
+                    **asdict(datasets.normalization),
+                },
             },
             "participant_count": datasets.participant_count,
             "split_sizes": datasets.sizes,

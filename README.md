@@ -73,7 +73,7 @@ Every successful run exports a checkpoint to `artifacts/cnn` by default. The nam
 artifacts/cnn/CNNv1_10users_200mswindow.pt
 ```
 
-Use `--output-dir PATH` to change the directory. The checkpoint contains CPU weights (`state_dict`), model and experiment configuration, class order, input shape and sampling rate, split sizes, and final test metrics. It is the source artifact for subsequent quantization/conversion to the embedded deployment format; it is not directly loadable by a microcontroller.
+Use `--output-dir PATH` to change the directory. The checkpoint contains CPU weights (`state_dict`), model and experiment configuration, class order, input shape and sampling rate, training-derived per-channel normalization statistics, split sizes, and final test metrics. The saved mean and standard deviation must be applied to every input window during deployment. The checkpoint is the source artifact for subsequent quantization/conversion to the embedded deployment format; it is not directly loadable by a microcontroller.
 
 Run the automated tests with:
 

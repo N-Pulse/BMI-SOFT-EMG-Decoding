@@ -12,6 +12,11 @@ import torch
 from torch.utils.data import Dataset, TensorDataset
 
 from bmiemg.data.epn612.loader import EMGTrial, load_user_trials
+from bmiemg.preprocessing.emg import (
+    ChannelNormalizationStats,
+    fit_channel_normalization,
+    normalize_emg_channels,
+)
 from bmiemg.preprocessing.segmentation import labelled_interval
 
 from .adaptation import (
@@ -49,6 +54,7 @@ class EPN612DatasetConfig:
     max_participants: int | None = None
     split_ratios: tuple[float, float, float] = (0.70, 0.15, 0.15)
     class_labels: tuple[str, ...] = MOVEMENTS
+    normalization_epsilon: float = 1e-6
     adaptation: BoardAdaptationConfig = field(default_factory=BoardAdaptationConfig)
     windows: WindowConfig = field(default_factory=WindowConfig)
 
@@ -67,6 +73,11 @@ class EPN612DatasetConfig:
             self.class_labels
         ):
             raise ValueError("class_labels must be non-empty and unique")
+        if (
+            not np.isfinite(self.normalization_epsilon)
+            or self.normalization_epsilon <= 0
+        ):
+            raise ValueError("normalization_epsilon must be positive")
 
     @property
     def named_split_ratios(self) -> dict[str, float]:
@@ -85,6 +96,7 @@ class DatasetSplits:
     test: WindowDataset
     class_labels: tuple[str, ...]
     participant_count: int
+    normalization: ChannelNormalizationStats
 
     @property
     def sizes(self) -> dict[str, int]:
@@ -155,8 +167,17 @@ def build_epn612_datasets(
                 windows[split].extend(extracted)
                 labels[split].extend([label_to_index[trial.gesture]] * len(extracted))
 
+    normalization = fit_channel_normalization(
+        windows["train"],
+        epsilon=config.normalization_epsilon,
+    )
     datasets = {
-        split: _to_tensor_dataset(split, windows[split], labels[split])
+        split: _to_tensor_dataset(
+            split,
+            windows[split],
+            labels[split],
+            normalization,
+        )
         for split in DATASET_SPLIT_NAMES
     }
 
@@ -166,6 +187,7 @@ def build_epn612_datasets(
         datasets["test"],
         config.class_labels,
         len(selection.participants),
+        normalization,
     )
     empty = [name for name, size in result.sizes.items() if size == 0]
     if empty:
@@ -297,9 +319,12 @@ def _to_tensor_dataset(
     split: str,
     windows: list[np.ndarray],
     labels: list[int],
+    normalization: ChannelNormalizationStats,
 ) -> TensorDataset:
     if not windows:
         raise ValueError(f"EPN-612 produced no {split} windows")
-    signals = torch.from_numpy(np.stack(windows)).float()
+    signals = torch.from_numpy(
+        normalize_emg_channels(np.stack(windows), normalization)
+    ).float()
     targets = torch.tensor(labels, dtype=torch.long)
     return TensorDataset(signals, targets)

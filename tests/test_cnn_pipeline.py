@@ -110,12 +110,32 @@ def test_single_participant_keeps_every_trials_windows_in_one_split(monkeypatch)
 
     datasets = build_epn612_datasets(config, random_seed=42)
 
+    assignments = assign_trial_splits(
+        trials,
+        ratios={"train": 0.5, "validation": 0.25, "test": 0.25},
+        random_seed=42,
+    )
+    training_values = np.array(
+        [
+            int(trial.trial_id.removeprefix("idx_"))
+            for trial in trials
+            if assignments[trial.trial_id] == "train"
+        ]
+    )
+    np.testing.assert_allclose(datasets.normalization.mean, training_values.mean())
+    np.testing.assert_allclose(
+        datasets.normalization.standard_deviation,
+        training_values.std(),
+    )
+
     trial_ids_by_split = []
     for dataset in (datasets.train, datasets.validation, datasets.test):
         signals, _ = dataset.tensors
-        trial_ids = [int(value) for value in signals[:, 0, 0].tolist()]
-        assert all(trial_ids.count(trial_id) == 2 for trial_id in set(trial_ids))
-        trial_ids_by_split.append(set(trial_ids))
+        trial_values = signals[:, 0, 0].tolist()
+        assert all(
+            trial_values.count(trial_value) == 2 for trial_value in set(trial_values)
+        )
+        trial_ids_by_split.append(set(trial_values))
     assert trial_ids_by_split[0].isdisjoint(trial_ids_by_split[1])
     assert trial_ids_by_split[0].isdisjoint(trial_ids_by_split[2])
     assert trial_ids_by_split[1].isdisjoint(trial_ids_by_split[2])

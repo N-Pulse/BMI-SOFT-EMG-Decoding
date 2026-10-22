@@ -3,11 +3,14 @@ from .envelop import get_envelop
 from .list_features import TIME_FEATURE_FUNCTIONS, FREQ_FEATURE_FUNCTIONS
 from .emg import (
     ALL_FEATURE_NAMES,
+    ChannelNormalizationStats,
     EMGProcessingConfig,
     expanded_feature_names,
     extract_emg_features,
+    fit_channel_normalization,
     filter_emg_windows,
     milliseconds_to_samples,
+    normalize_emg_channels,
     validate_emg_windows,
 )
 from .segmentation import LabelledEMGWindow, iter_trial_windows, labelled_interval
@@ -19,13 +22,16 @@ __all__ = [
     "TIME_FEATURE_FUNCTIONS",
     "FREQ_FEATURE_FUNCTIONS",
     "ALL_FEATURE_NAMES",
+    "ChannelNormalizationStats",
     "EMGProcessingConfig",
     "LabelledEMGWindow",
     "expanded_feature_names",
     "extract_emg_features",
+    "fit_channel_normalization",
     "filter_emg_windows",
     "iter_trial_windows",
     "labelled_interval",
     "milliseconds_to_samples",
+    "normalize_emg_channels",
     "validate_emg_windows",
 ]
