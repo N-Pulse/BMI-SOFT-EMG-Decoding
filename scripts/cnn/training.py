@@ -23,8 +23,9 @@ class TCNNConfig:
     """Parameters controlling the TCNN architecture."""
 
     n_channels: int = 8
-    time_kernel: int = 5
-    pool_stride: int = 1
+    time_kernel: int = 7
+    temporal_strides: tuple[int, int, int] = (2, 2, 1)
+    temporal_dilations: tuple[int, int, int] = (1, 2, 4)
     n_filters: tuple[int, int, int, int] = (32, 32, 64, 64)
 
     def __post_init__(self) -> None:
@@ -32,10 +33,31 @@ class TCNNConfig:
             raise ValueError("n_channels must be positive")
         if self.time_kernel <= 0 or self.time_kernel % 2 == 0:
             raise ValueError("time_kernel must be a positive odd integer")
-        if self.pool_stride <= 0:
-            raise ValueError("pool_stride must be positive")
+        if len(self.temporal_strides) != 3 or any(
+            value <= 0 for value in self.temporal_strides
+        ):
+            raise ValueError("temporal_strides must contain three positive integers")
+        if len(self.temporal_dilations) != 3 or any(
+            value <= 0 for value in self.temporal_dilations
+        ):
+            raise ValueError("temporal_dilations must contain three positive integers")
         if len(self.n_filters) != 4 or any(value <= 0 for value in self.n_filters):
             raise ValueError("n_filters must contain four positive integers")
+
+    @property
+    def temporal_receptive_field_samples(self) -> int:
+        """Return the input span seen by one final temporal feature."""
+
+        receptive_field = 1
+        input_spacing = 1
+        for stride, dilation in zip(
+            self.temporal_strides,
+            self.temporal_dilations,
+            strict=True,
+        ):
+            receptive_field += (self.time_kernel - 1) * dilation * input_spacing
+            input_spacing *= stride
+        return receptive_field
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,7 +116,8 @@ def build_tcnn(config: TCNNConfig, n_classes: int) -> TCNN:
         n_channels=config.n_channels,
         n_classes=n_classes,
         time_kernel=config.time_kernel,
-        pool_stride=config.pool_stride,
+        temporal_strides=config.temporal_strides,
+        temporal_dilations=config.temporal_dilations,
         n_filters=config.n_filters,
     )
 

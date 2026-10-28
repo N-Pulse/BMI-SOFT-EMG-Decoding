@@ -94,9 +94,9 @@ def select_participant_splits(
 ) -> ParticipantSplits:
     """Select participants and create subject-disjoint split assignments.
 
-    A single selected participant is returned as one ``all`` split. Its windows
-    can then be divided reproducibly after extraction. Cohort runs assign whole
-    participants to train, validation, and test splits.
+    A single selected participant is returned as one ``all`` split. Its trials
+    can then be divided reproducibly before their windows enter the datasets.
+    Cohort runs assign whole participants to train, validation, and test splits.
     """
 
     if participant_id is not None and max_participants is not None:

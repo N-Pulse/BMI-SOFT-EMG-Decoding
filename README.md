@@ -26,7 +26,7 @@ Run training from the repository root. Validation runs after every epoch; the
 held-out test split is evaluated once at the end.
 
 ```bash
-# One participant (its windows are split 70/15/15)
+# One participant (complete trials are split 70/15/15)
 poetry run python scripts/cnn/train.py --user trainingJSON:user1
 
 # Subject-disjoint cohort split (use at least 5 participants)
@@ -51,10 +51,10 @@ poetry run python scripts/cnn/train.py --max-users 20 --epochs 30 \
 | Option | Default | Purpose |
 |---|---:|---|
 | `--dataset-root PATH` | EPN-612 data directory | Override the dataset location |
-| `--user ID` | All participants | Train one participant, e.g. `trainingJSON:user1` |
+| `--user ID` | All participants | Train one participant with trial-disjoint splits, e.g. `trainingJSON:user1` |
 | `--max-users N` | All participants | Use the first `N` participants with subject-disjoint splits |
 | `--window-size N` | `400` | Window length in adapted 2 kHz samples |
-| `--window-step N` | `200` | Step between windows in adapted samples |
+| `--window-step N` | `200` | Step between windows in adapted 2 kHz samples |
 | `--max-windows-per-trial N` | `10` | Limit retained windows per trial |
 | `--epochs N` | `10` | Number of training epochs |
 | `--batch-size N` | `32` | Mini-batch size |
@@ -73,7 +73,9 @@ Every successful run exports a checkpoint to `artifacts/cnn` by default. The nam
 artifacts/cnn/CNNv1_10users_200mswindow.pt
 ```
 
-Use `--output-dir PATH` to change the directory. The checkpoint contains CPU weights (`state_dict`), model and experiment configuration, class order, input shape and sampling rate, split sizes, and final test metrics. It is the source artifact for subsequent quantization/conversion to the embedded deployment format; it is not directly loadable by a microcontroller.
+The CNN uses board-adapted 2 kHz signals and 400-sample, 200 ms windows. Its temporal convolutions use strides `(2, 2, 1)` and dilations `(1, 2, 4)`, so each final temporal feature sees 127 input samples, or 63.5 ms at 2 kHz, while reducing the temporal feature-map length by four.
+
+Use `--output-dir PATH` to change the directory. The checkpoint contains CPU weights (`state_dict`), model and experiment configuration, class order, input shape and sampling rate, training-derived per-channel normalization statistics, split sizes, and final test metrics. The saved mean and standard deviation must be applied to every input window during deployment. The checkpoint is the source artifact for subsequent quantization/conversion to the embedded deployment format; it is not directly loadable by a microcontroller.
 
 Run the automated tests with:
 
