@@ -8,6 +8,7 @@
 This repository is responsible for the handling of the EMG decoding pipeline: from the raw data to an effective decoder!
 
 ## Handling the Data
+
 Because we have an in-house data acquisition pipeline we need a pipeline for Downloading and Loading the data. The downloading the data is currently being implemented and should follow the following architecture:
 
 ![image](images/class.png)
@@ -22,24 +23,23 @@ Per-source setup lives with the code: see [`src/bmiemg/download/README.md`](src/
 
 ## CNN training and export
 
-Run training from the repository root. Validation runs after every epoch; the
-held-out test split is evaluated once at the end.
+Run training from the repository root. Validation runs after every epoch; the held-out test split is evaluated once at the end.
 
 ```bash
 # One participant (its windows are split 70/15/15)
-poetry run python scripts/cnn/train.py --user trainingJSON:user1
+poetry run python -m scripts.cnn.train --user trainingJSON:user1
 
 # Subject-disjoint cohort split (use at least 5 participants)
-poetry run python scripts/cnn/train.py --max-users 10
+poetry run python -m scripts.cnn.train --max-users 10
 
 # Full dataset
-poetry run python scripts/cnn/train.py
+poetry run python -m scripts.cnn.train
 ```
 
 Common tuning options are available with `--help`, for example:
 
 ```bash
-poetry run python scripts/cnn/train.py --max-users 20 --epochs 30 \
+poetry run python -m scripts.cnn.train --max-users 20 --epochs 30 \
   --batch-size 64 --learning-rate 0.0005 --window-size 400 \
   --window-step 200 --model-name CNNv2
 ```

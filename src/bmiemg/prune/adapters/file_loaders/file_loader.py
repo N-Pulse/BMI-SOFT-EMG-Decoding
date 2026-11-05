@@ -1,8 +1,8 @@
 # ================================================================
 # 0. Section: IMPORTS
 # ================================================================
-from pathlib import Path
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 from ...domain import DataActor
 
@@ -12,5 +12,5 @@ from ...domain import DataActor
 # ================================================================
 class FileLoader(ABC):
     @abstractmethod
-    def load_file(self, path: Path) -> DataActor:
+    def load_actors(self, path: Path) -> list[DataActor]:
         raise NotImplementedError

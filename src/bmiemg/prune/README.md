@@ -24,11 +24,11 @@ Actors are dataclasses carried between steps. Each step declares which actor typ
 | Actor | Produced by | Contents |
 |---|---|---|
 | `XdfData` | `XdfLoader` | Raw pyxdf `streams` plus file metadata. |
-| `TrialData` | `SignalUnwarpStep` | `signal_ch` `(channels, time)`, per-sample `markers` `(1, time)`, `channel_names`, `sfreq`. |
+| `TrialData` | `SignalUnwarpStep`, `Epn612JsonLoader` | `signal_ch` `(channels, time)`, per-sample `markers` `(1, time)`, `channel_names`, `sfreq`. |
 | `DatasetPartition` | `TTVSplitStep` | One of `train`/`val`/`test` and its trials; `mne_dataset` builds an `mne` Raw. |
 | `Dataset` | `TTVSplitStep` | `client` and `server` partition lists. |
 
-`XdfData` and `TrialData` inherit from `MetadataActor`, which derives `session_number`, `subject_number` and `date` from the `bids_local` folder layout (`<date>/<subject>/<session>/<modality>/<file>`).
+`XdfData` and `TrialData` inherit from `MetadataActor`, which derives `session_number`, `subject_number` and `date` from the `bids_local` folder layout (`<date>/<subject>/<session>/<modality>/<file>`). Loaders for sources without that layout set `subject_id` instead, which `subject_number` returns first.
 
 ---
 
@@ -44,6 +44,11 @@ Steps whose parameters aren't plain YAML types (tuples, nested dataclasses) over
 Turns the raw data from the acquisition team into a usable train/val/test dataset:
 
 `remove_session` → `signal_split` → `protocol_definer` → `signal_unwarp` → `analogue_filter` → `marker_unification` → `build_epochs` → `ttv_split`, exported with `dataset`.
+
+### epn612_adapted_v1
+Adapts EMG-EPN-612 (Myo armband, signed 8-bit, 200 Hz, read by `Epn612JsonLoader` from `data/raw/emg_epn_612/`) to the board domain (signed 12-bit ADC, 2000 Hz, first-order 20-500 Hz front end) and splits it subject-disjoint 70/15/15:
+
+`adc_normalize` (8 bits) → `resample` (2000 Hz, `padtype: line`) → `analogue_filter` (causal 20 Hz high-pass) → `analogue_filter` (causal 500 Hz low-pass) → `adc_quantize` (12 bits) → `marker_unification` → `ttv_split` (`group_by: subject`), exported with `dataset`. Trials stay whole: windowing is left to the model.
 
 ---
 
@@ -76,6 +81,23 @@ Applies a Butterworth filter emulating the device's analogue front end. It uses 
 - `btype: "bandpass" | "bandstop" | "lowpass" | "highpass"`
 - `cutoff: float | [low, high]`: a pair is required for band filters, a single value otherwise.
 - `order: int = 1`
+- `causal: bool = False`: filter forward only with `sosfilt`, like the real front end, instead of zero-phase `sosfiltfilt`. It adds the front end's phase lag.
+
+### ResampleStep - `resample` (`TrialData → TrialData`)
+Polyphase-resamples the signal (`scipy.signal.resample_poly`) to a target rate, with the up/down factors taken from the rate ratio. Markers are held from their source sample, so an onset at source index `i` lands on `i * up / down`. Actors already at the target rate pass through.
+
+- `sfreq: float`: target sampling rate in Hz.
+- `padtype: "constant" | "line" | "mean" | "median" | "maximum" | "minimum" = "constant"`: edge padding passed to `resample_poly`.
+
+### AdcNormalizeStep - `adc_normalize` (`TrialData → TrialData`)
+Maps signed ADC counts to fractional full scale (`counts / 2^(bits-1)`, in `[-1, 1)`), so signals from ADCs of different resolutions share one scale. Counts outside the signed range raise `ValueError`.
+
+- `bits: int`: source ADC resolution, 2 to 32.
+
+### AdcQuantizeStep - `adc_quantize` (`TrialData → TrialData`)
+Quantizes fractional full scale to the signed counts of a target ADC: `rint(x * 2^(bits-1))`, saturated to `[-2^(bits-1), 2^(bits-1) - 1]`, stored as `int16` (`int32` above 16 bits).
+
+- `bits: int`: target ADC resolution, 2 to 32.
 
 ### MarkerUnificationStep - `marker_unification` (`TrialData → TrialData`)
 Rewrites every raw marker code into the canonical `XXDD` code (`XX` = phase, `DD` = movement), so recordings from different protocol versions share one marker vocabulary. The actor's `protocol_version` picks the source schema, and a missing schema raises `ValueError`. `0` stays background.
@@ -98,15 +120,17 @@ Shuffles trials (seeded) into train/val/test, optionally stratified so each subj
 - `user_balance: bool = False`: stratify by subject.
 - `movement_balance: bool = False`: stratify by dominant movement.
 - `seed: int = 0`
+- `group_by: "subject" | None = None`: assign whole subjects to one partition (subject-disjoint split). Subject counts per partition use largest-remainder rounding. It cannot be combined with `user_balance` or `movement_balance`.
 
 ---
 
 ## 4. File loaders
-`Loader` walks `data/<source_name>/` recursively and dispatches each file to the `FileLoader` registered for its suffix. Files with unknown suffixes are skipped and reported.
+`Loader` walks `data/<source_name>/` recursively and dispatches each file to the `FileLoader` registered for its suffix. Files with unknown suffixes are skipped and reported. Each `FileLoader` implements `load_actors(path)`, returning every actor the file holds: one for a continuous recording, one per trial when a file stores several.
 
 | Class | Suffix | Produces |
 |---|---|---|
 | `XdfLoader` | `.xdf` | `XdfData` |
+| `Epn612JsonLoader` | `.json` | One `TrialData` per EMG-EPN-612 `trainingSamples` trial (8 channels, raw counts). `subject_id` is the `user<N>` number, plus 1000 under `testingJSON`. Markers are raw codes `3000M` (phase 3, `M` = gesture: 1 noGesture, 2 fist, 3 waveIn, 4 waveOut, 5 open, 6 pinch) over the `groundTruth` samples, or the whole trial when there is none (noGesture); `marker_unification` maps them to `XXDD` (in `epn612_adapted_v1`: waveIn → rotate wrist right, waveOut → rotate wrist left, noGesture → background `0`). |
 
 ## 5. Writers
 `Exporter` runs each writer from the protocol's `export:` section on every actor whose `name` matches the writer's `actor`. A writer that finds no matching actor raises `ValueError`. Output goes to `data/dataset/<protocol_name>/`, and every file of one run shares a UTC timestamp suffix.
@@ -195,11 +219,11 @@ Subclass `DataActor` (or `MetadataActor` if it comes from a recording file) as a
 ```python
 @FileLoaderRegistry.register(".csv")
 class CsvLoader(FileLoader):
-    def load_file(self, path: Path) -> DataActor:
+    def load_actors(self, path: Path) -> list[DataActor]:
         ...
 ```
 
-The key is the lowercase file suffix, dot included. Return one actor per file. Export it from `adapters/file_loaders/__init__.py`, and add the actor it produces if none fits.
+The key is the lowercase file suffix, dot included. Return every actor the file holds: one for a continuous recording, one per trial when the file stores several. Export it from `adapters/file_loaders/__init__.py`, and add the actor it produces if none fits.
 
 ### New writer (`adapters/exporters/`)
 

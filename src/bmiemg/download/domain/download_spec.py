@@ -1,13 +1,12 @@
 # ================================================================
 # 0. Section: IMPORTS
 # ================================================================
-from typing import ClassVar
 from dataclasses import dataclass
-
+from typing import ClassVar
 
 
 # ================================================================
-# 1. Section: Functions
+# 1. Section: Class definition
 # ================================================================
 @dataclass
 class DownloadSpec:

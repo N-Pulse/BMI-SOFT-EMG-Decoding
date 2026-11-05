@@ -8,11 +8,13 @@ from ...domain import DownloadSpec
 
 
 # ================================================================
-# 1. Section: Functions
+# 1. Section: Class definition
 # ================================================================
 @dataclass
-class EPN612Specs(DownloadSpec):
-    source: ClassVar[str] = "emg-epn-612"
+class ZenodoSpecs(DownloadSpec):
+    source: ClassVar[str] = "zenodo"
 
-    record_id: int = 4421500
-    filename: str = "EMG-EPN612 Dataset.zip"
+    record_id: int
+    filename: str
+    extract: bool = True
+    extract_to: str | None = None

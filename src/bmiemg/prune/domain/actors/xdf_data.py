@@ -1,6 +1,7 @@
 # ================================================================
 # 0. Section: IMPORTS
 # ================================================================
+from typing import ClassVar
 from dataclasses import dataclass
 
 from .metadata_actor import MetadataActor
@@ -11,4 +12,5 @@ from .metadata_actor import MetadataActor
 # ================================================================
 @dataclass(kw_only=True)
 class XdfData(MetadataActor):
+    name: ClassVar[str] = "xdf_data"
     streams: list[dict]

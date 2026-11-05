@@ -3,12 +3,11 @@
 # ================================================================
 from dataclasses import dataclass, field
 
-from ..domain import Registry, DownloadSpec
-
+from ..domain import DownloadSpec, Registry
 
 
 # ================================================================
-# 1. Section: Functions
+# 1. Section: Class definition
 # ================================================================
 @dataclass
 class Downloader:
@@ -19,5 +18,6 @@ class Downloader:
         source = spec.source
         strategy = self._registry.get(source)
 
-        # 2. Fetch data using selected strategy
+        # 2. Check the source is reachable, then fetch from it
+        strategy.validate(spec)
         strategy.fetch(spec)

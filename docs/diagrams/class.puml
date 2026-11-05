@@ -84,7 +84,6 @@ package "Download" {
 
     package "Adapter Layer" #E3F2FD {
         class ArchiveStrategy <<implemented>> {
-            - _auth: HTTPBasicAuth
         }
         ArchiveStrategy ..|> DownloadStrategy
 
@@ -97,12 +96,13 @@ package "Download" {
             + filename: str | None
             + extra: dict
 
-            - _dav_root: str
-            - _dav_url: str
-            - _base_url: str
-            - _header: dict
-            - _body: str
-            - _namespaces: dict
+            + dav_root: str
+            + dav_url: str
+            + base_url: str
+            + body: str
+            + namespaces: dict
+
+            + header(depth: int | str): dict
         }
         ArchiveSpecs --|> DownloadSpec
     }
@@ -222,6 +222,9 @@ package "Dataset Pruner" {
             - MarkerUnificationStep (marker_unification)
             - BuildEpochs (build_epochs)
             - TTVSplitStep (ttv_split)
+            - ResampleStep (resample)
+            - AdcNormalizeStep (adc_normalize)
+            - AdcQuantizeStep (adc_quantize)
         end note
         PruneStep <|-left- PruneStepsNote
 
@@ -268,7 +271,7 @@ package "Dataset Pruner" {
 
         package "Loader Sub-Classes" {
             abstract class FileLoader <<implemented>> {
-                + def load_file(path: Path): DataActor
+                + def load_actors(path: Path): list[DataActor]
             }
             FileLoader ..> DataActor
 
@@ -283,6 +286,7 @@ package "Dataset Pruner" {
             note as FileLoadersNote
                 Currently implemented file loaders (suffix):
                 - XdfLoader (.xdf)
+                - Epn612JsonLoader (.json)
             end note
             FileLoader <|-- FileLoadersNote
         }
@@ -323,4 +327,341 @@ package "Dataset Pruner" {
         }
     }
 }
+
+
+'=============================================================================='
+'Models Package'
+'=============================================================================='
+package "Models" {
+    package "Service Layer" #E8F5E9 {
+        class ModelTrainer <<planned>> {
+            + data_dir: Path = "data/dataset/"
+            + config_dir: Path = "configs/model/train/"
+
+            - _reader: DatasetReader
+            - _config_loader: ConfigLoader
+            - _store: ArtifactStore
+
+            + run(protocol_name: str): ModelArtifact
+        }
+
+
+        class ModelEvaluator <<planned>> {
+            + data_dir: Path = "data/dataset/"
+            + config_dir: Path = "configs/model/eval/"
+
+            - _reader: DatasetReader
+            - _config_loader: ConfigLoader
+            - _store: ArtifactStore
+
+            + run(protocol_name: str): EvaluationReport
+        }
+    }
+
+
+    package "Model Domain Layer" #FFF8E1 {
+        package "Model Actors" {
+            class PartitionData <<planned>> {
+                + name = "partition_data"
+                + group: "client" | "server"
+                + partition_name: "train" | "val" | "test"
+                + signals: list[NDArray]
+                + markers: list[NDArray]
+                + subjects: list[int]
+                + channel_names: list[str]
+                + sfreq: float
+            }
+
+
+            class WindowSet <<planned>> {
+                + name = "window_set"
+                + source: PartitionData
+                + x: NDArray
+                + y: NDArray | None
+                + subjects: NDArray
+                + class_labels: list[str]
+            }
+            WindowSet o-- PartitionData
+
+
+            class Predictions <<planned>> {
+                + name = "predictions"
+                + partition: str
+                + y_pred: NDArray
+                + y_proba: NDArray | None
+                + y_true: NDArray | None
+                + subjects: NDArray
+            }
+
+
+            note as ModelActorsNote
+                All three subclass the prune DataActor
+                (dataclass, name ClassVar, copy_with).
+            end note
+            PartitionData <|-- ModelActorsNote
+        }
+
+
+        class WindowConfig <<planned>> {
+            + size_ms: float = 200
+            + step_ms: float = 100
+            + max_per_trial: int | None = 10
+            + only_labelled: bool = True
+            + label_rule: "majority" | "last" = "majority"
+            + classes: list[str] | None
+            + one_vs_all: str | None
+
+            + def apply(partition: PartitionData): WindowSet
+        }
+        WindowConfig ..> PartitionData
+        WindowConfig ..> WindowSet
+
+
+        abstract class Model <<planned>> {
+            + name: ClassVar[str]
+            + seed: int
+
+            + def from_config(data: dict, seed: int): Model
+            + def fit(train: WindowSet, val: WindowSet | None): TrainingReport
+            + def predict(windows: WindowSet): Predictions
+            + def to_bytes(): bytes
+            + def from_bytes(data: bytes): Model
+        }
+        Model ..> WindowSet
+        Model ..> Predictions
+
+
+        package "Model Implementations" {
+            abstract class SklearnModel <<planned>> {
+                + params: dict
+                + features: list[str]
+            }
+            SklearnModel --|> Model
+
+
+            abstract class TorchModel <<planned>> {
+                + epochs: int
+                + batch_size: int
+                + learning_rate: float
+                + device: str = "auto"
+            }
+            TorchModel --|> Model
+
+
+            note as ModelsNote
+                Planned models (YAML key):
+                - SvmModel (svm): SklearnModel
+                - LogisticRegressionModel (logistic_regression): SklearnModel
+                - DecisionTreeModel (decision_tree): SklearnModel
+                - TcnnModel (tcnn): TorchModel, Atzori 2016
+            end note
+            SklearnModel <|-- ModelsNote
+        }
+
+
+        class ModelRegistry <<planned>> {
+        }
+        ModelRegistry --|> Utils.Registry
+        ModelRegistry ..> Model
+
+
+        abstract class Metric <<planned>> {
+            + name: ClassVar[str]
+
+            + def score(predictions: Predictions): float | NDArray
+        }
+        Metric ..> Predictions
+
+
+        class MetricRegistry <<planned>> {
+        }
+        MetricRegistry --|> Utils.Registry
+        MetricRegistry ..> Metric
+
+
+        note as MetricsNote
+            Planned metrics (YAML key):
+            - Accuracy (accuracy)
+            - BalancedAccuracy (balanced_accuracy)
+            - CohenKappa (cohen_kappa)
+            - F1 (f1): average
+            - ConfusionMatrix (confusion_matrix)
+            - FlipsPerSecond (flips_per_second)
+        end note
+        Metric <|-- MetricsNote
+
+
+        abstract class EvaluationScheme <<planned>> {
+            + name: ClassVar[str]
+
+            + def split(predictions: Predictions): dict[str, Predictions]
+        }
+        EvaluationScheme ..> Predictions
+
+
+        class SchemeRegistry <<planned>> {
+        }
+        SchemeRegistry --|> Utils.Registry
+        SchemeRegistry ..> EvaluationScheme
+
+
+        note as SchemesNote
+            Planned schemes (YAML key):
+            - PooledScheme (pooled)
+            - PerSubjectScheme (per_subject)
+            - PerClassScheme (per_class)
+        end note
+        EvaluationScheme <|-- SchemesNote
+
+
+        class DatasetRef <<planned>> {
+            + protocol: str
+            + timestamp: str = "latest"
+        }
+
+
+        class TrainProtocol <<planned>> {
+            + name: str
+            + seed: int
+            + dataset: DatasetRef
+            + window: WindowConfig
+            + model: Model
+            + val_metrics: Sequence[Metric]
+            + reports: Sequence[ReportWriter]
+        }
+        TrainProtocol --> WindowConfig
+        TrainProtocol o-- Model
+        TrainProtocol o-- Metric
+        TrainProtocol --> DatasetRef
+
+
+        class EvalProtocol <<planned>> {
+            + name: str
+            + artifact: Path
+            + dataset: DatasetRef
+            + targets: list[str]
+            + metrics: Sequence[Metric]
+            + schemes: Sequence[EvaluationScheme]
+            + reports: Sequence[ReportWriter]
+        }
+        EvalProtocol o-- Metric
+        EvalProtocol o-- EvaluationScheme
+        EvalProtocol --> DatasetRef
+
+
+        class ModelArtifact <<planned>> {
+            + name: str
+            + model_key: str
+            + model_params: dict
+            + window: WindowConfig
+            + class_labels: list[str]
+            + channel_names: list[str]
+            + sfreq: float
+            + seed: int
+            + dataset: DatasetRef
+            + git_commit: str
+            + created_at: str
+            + path: Path
+        }
+        ModelArtifact --> DatasetRef
+        ModelArtifact --> WindowConfig
+
+
+        class TrainingReport <<planned>> {
+            + history: dict[str, list[float]]
+            + val_scores: dict[str, float]
+            + fit_seconds: float
+            + n_parameters: int
+            + size_bytes: int
+        }
+
+
+        class EvaluationReport <<planned>> {
+            + artifact: ModelArtifact
+            + scores: dict[str, dict[str, float]]
+            + predictions: list[Predictions]
+        }
+        EvaluationReport --> ModelArtifact
+    }
+
+
+    package "Adapter Layer" #E3F2FD {
+        class DatasetReader <<planned>> {
+            + data_dir: Path
+
+            + read(ref: DatasetRef, partitions: list[str]): list[PartitionData]
+        }
+        DatasetReader ..> PartitionData
+        ModelTrainer --> DatasetReader
+        ModelEvaluator --> DatasetReader
+
+
+        class ConfigLoader <<planned>> {
+            + config_dir: Path
+
+            + load_train(name: str): TrainProtocol
+            + load_eval(name: str): EvalProtocol
+        }
+        ConfigLoader ..> TrainProtocol
+        ConfigLoader ..> EvalProtocol
+        ModelTrainer --> ConfigLoader
+        ModelEvaluator --> ConfigLoader
+
+
+        class ArtifactStore <<planned>> {
+            + root: Path = "artifacts/models/"
+
+            + save(model: Model, artifact: ModelArtifact, report: TrainingReport): Path
+            + load(path: Path): Model
+        }
+        ArtifactStore ..> ModelArtifact
+        ArtifactStore ..> ModelRegistry
+        ModelTrainer --> ArtifactStore
+        ModelEvaluator --> ArtifactStore
+        ArtifactStore ..> Model
+
+
+        package "Report Writers" {
+            abstract class ReportWriter <<planned>> {
+                + name: ClassVar[str]
+
+                + def from_config(data: dict): ReportWriter
+                + def write(report: TrainingReport | EvaluationReport, dest_dir: Path): None
+            }
+
+
+            class ReportWriterRegistry <<planned>> {
+            }
+            ReportWriterRegistry --|> Utils.Registry
+            ReportWriterRegistry ..> ReportWriter
+
+
+            note as ReportWritersNote
+                Planned report writers (YAML key):
+                - JsonMetricsWriter (json_metrics)
+                - PredictionsCsvWriter (predictions_csv)
+                - ConfusionPlotWriter (confusion_plot)
+                - TrainingCurvesWriter (training_curves)
+            end note
+            ReportWriter <|-- ReportWritersNote
+        }
+    }
+}
+
+!if ($SHOW_DEPENDENCIES == 1)
+PartitionData --|> DataActor
+WindowSet --|> DataActor
+Predictions --|> DataActor
+DatasetReader ..> DatasetWriter
+ConfigLoader ..> ModelRegistry
+ConfigLoader ..> MetricRegistry
+ConfigLoader ..> SchemeRegistry
+ConfigLoader ..> ReportWriterRegistry
+ModelTrainer ..> WindowConfig
+ModelEvaluator ..> WindowConfig
+ModelTrainer ..> ReportWriter
+ModelEvaluator ..> Metric
+ModelEvaluator ..> EvaluationScheme
+ModelEvaluator ..> ReportWriter
+!endif
 @enduml

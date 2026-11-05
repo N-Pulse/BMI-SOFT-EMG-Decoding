@@ -1,6 +1,6 @@
 """Train the TCNN on subject-disjoint EMG-EPN-612 windows.
 
-Run from the repository root with ``poetry run python scripts/cnn/train.py``.
+Run from the repository root with ``poetry run python -m scripts.cnn.train``.
 The complete default experiment is intentionally declared below so a new setup
 can be understood and changed without tracing constants through the codebase.
 """
@@ -19,8 +19,8 @@ import numpy as np
 import torch
 from torch import nn
 
-from epn612.adaptation import BoardAdaptationConfig
-from epn612.dataset import (
+from ..epn612.adaptation import BoardAdaptationConfig
+from ..epn612.dataset import (
     EPN612DatasetConfig,
     WindowConfig,
     build_epn612_datasets,
@@ -36,6 +36,8 @@ if __package__:  # Installed package or ``python -m cnn.train``.
         fit,
         save_checkpoint,
     )
+    from .evaluation_cnn import compute_test_metrics, save_results
+    
 else:  # Direct ``python scripts/cnn/train.py`` execution.
     from training import (
         TCNNConfig,
@@ -47,8 +49,10 @@ else:  # Direct ``python scripts/cnn/train.py`` execution.
         save_checkpoint,
     )
 
+    from evaluation_cnn import compute_test_metrics, save_results
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+USE_NOTCH = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +100,7 @@ DEFAULT_CONFIG = ExperimentConfig(
             highpass_hz=20.0,
             lowpass_hz=500.0,
             filter_order=1,
+            notch=USE_NOTCH, 
         ),
         windows=WindowConfig(
             size_samples=400,  # 200 ms at 2 kHz
@@ -156,11 +161,17 @@ def run_experiment(config: ExperimentConfig) -> Path:
     loss_fn = nn.CrossEntropyLoss(label_smoothing=config.training.label_smoothing)
 
     # 4. Optimization with validation after each epoch.
-    fit(model, loaders, optimizer, loss_fn, config.training, device)
+    history = fit(model, loaders, optimizer, loss_fn, config.training, device)
 
     # 5. One final evaluation on the held-out test split.
     test_metrics = evaluate(model, loaders.test, loss_fn, device)
     print(f"test loss {test_metrics.loss:.3f} acc {test_metrics.accuracy:.2f}")
+
+    # 5b. Per-class test metrics and saved results (test used once, after training).
+    evaluation = compute_test_metrics(model, loaders.test, device, datasets.class_labels)
+    print(f"test balanced acc {evaluation.balanced_accuracy:.2f} | macro F1 {evaluation.macro_f1:.2f}")
+    window_ms = 1000 * config.data.windows.size_samples / config.data.adaptation.target_sampling_rate_hz
+    save_results(evaluation, history, datasets.participant_count, config.training.epochs, window_ms)
 
     # 6. Export CPU weights and everything needed to reconstruct the model.
     destination = checkpoint_path(config, datasets.participant_count)

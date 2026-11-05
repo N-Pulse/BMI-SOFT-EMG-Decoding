@@ -15,12 +15,14 @@ from .file_loader_registry import FileLoaderRegistry
 # ================================================================
 @FileLoaderRegistry.register(".xdf")
 class XdfLoader(FileLoader):
-    def load_file(self, path: Path) -> DataActor:
+    def load_actors(self, path: Path) -> list[DataActor]:
         streams, file_header = pyxdf.load_xdf(path)
 
-        return XdfData(
-            streams=streams,
-            file_header=file_header,
-            file_name=path.stem,
-            file_path=path,
-        )
+        return [
+            XdfData(
+                streams=streams,
+                file_header=file_header,
+                file_name=path.stem,
+                file_path=path,
+            )
+        ]

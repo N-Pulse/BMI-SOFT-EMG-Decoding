@@ -1,0 +1,76 @@
+protocol_name: epn612_adapted_v1
+
+# EMG-EPN-612 (Myo, signed 8-bit, 200 Hz) adapted to the board domain
+# (signed 12-bit ADC, 2000 Hz, first-order 20-500 Hz analogue front end).
+steps:
+  - adc_normalize:
+      bits: 8
+
+  - resample:
+      sfreq: 2000.0
+      padtype: line
+
+  # Two cascaded first-order stages, like the board's two RC stages.
+  - analogue_filter:
+      btype: highpass
+      cutoff: 20.0
+      order: 1
+      causal: true
+
+  - analogue_filter:
+      btype: lowpass
+      cutoff: 500.0
+      order: 1
+      causal: true
+
+  - adc_quantize:
+      bits: 12
+
+  # Epn612JsonLoader writes raw codes 3000M (phase 3 = move, M = gesture).
+  - marker_unification:
+      source_schemas:
+        0:
+          phase_pos: 0
+          movement_slice: [3, 5]
+          phase_map:
+            3: "move"
+          movement_groups:
+            "close hand": [2]
+            "rotate wrist right": [3]  # waveIn
+            "rotate wrist left": [4]  # waveOut
+            "open hand": [5]
+            "pinch": [6]
+          special_triggers:
+            30001: "undefined"  # noGesture is background (0), like rest in-house
+      target:
+        phases:
+          "undefined": 0
+          "cue": 1
+          "prep": 2
+          "move": 3
+          "return": 4
+          "iti": 5
+          "resting state, eyes open": 6
+          "resting state, eyes closed": 7
+          "start LabRecorder": 8
+          "experiment finished": 9
+          "test marker": 10
+        movements:
+          "undefined": 0
+          "open hand": 1
+          "close hand": 2
+          "rotate wrist right": 3
+          "rotate wrist left": 4
+          "pinch": 5
+
+  - ttv_split:
+      train_ratio: 0.7
+      val_ratio: 0.15
+      test_ratio: 0.15
+      group_by: subject
+      seed: 42
+
+export:
+  - dataset:
+      fmt: .fif
+      zip_groups: true

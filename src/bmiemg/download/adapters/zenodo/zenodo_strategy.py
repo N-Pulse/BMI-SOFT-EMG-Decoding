@@ -1,49 +1,51 @@
 # ================================================================
 # 0. Section: IMPORTS
 # ================================================================
-import hashlib
 import zipfile
-from dataclasses import dataclass
-from pathlib import Path
-
+import hashlib
 import requests
-from tqdm import tqdm
 
-from .epn612_specs import EPN612Specs
+from tqdm import tqdm
+from pathlib import Path
+from dataclasses import dataclass
+
+from .zenodo_specs import ZenodoSpecs
 from ...domain import DownloadStrategy, Registry
 
-
+# ================================================================
+# 1. Section: Constants
+# ================================================================
 CHUNK_SIZE = 1024 * 1024
 REQUEST_TIMEOUT = (30, 300)
 
+
 # ================================================================
-# 1. Section: Functions
+# 2. Section: Class definition
 # ================================================================
-@Registry.register("emg-epn-612")
+@Registry.register(ZenodoSpecs.source)
 @dataclass
-class EPN612Strategy(DownloadStrategy[EPN612Specs]):
-    def validate(self, spec: EPN612Specs) -> None:
+class ZenodoStrategy(DownloadStrategy[ZenodoSpecs]):
+    def validate(self, spec: ZenodoSpecs) -> None:
         _resolve_file(spec)
 
-    def fetch(self, spec: EPN612Specs) -> None:
+    def fetch(self, spec: ZenodoSpecs) -> None:
+        # 1. Resolve the remote file and its integrity metadata
         remote_file = _resolve_file(spec)
         download_url = _download_url(remote_file)
         expected_size = int(remote_file["size"])
         expected_checksum = _md5_checksum(remote_file["checksum"])
 
+        # 2. Makes sure we have a folder to download to
         destination = Path(spec.dest)
         destination.mkdir(parents=True, exist_ok=True)
 
         archive_path = destination / spec.filename
         partial_path = archive_path.with_suffix(archive_path.suffix + ".part")
 
-        # A valid archive means the dataset was already downloaded and is up-to-date => skip download
+        # 3. Download and verify
         if not _is_valid_file(archive_path, expected_size, expected_checksum):
             actual_checksum = _stream_download(
-                download_url,
-                partial_path,
-                expected_size,
-                spec.filename,
+                download_url, partial_path, expected_size, spec.filename
             )
             actual_size = partial_path.stat().st_size
 
@@ -59,20 +61,21 @@ class EPN612Strategy(DownloadStrategy[EPN612Specs]):
                     f"{expected_checksum}, received {actual_checksum}"
                 )
 
-            # Only expose the final filename after all integrity checks pass.
-            # The .part file remains available for diagnosis after a failure.
             partial_path.replace(archive_path)
 
+        # 4. Extract
+        if not spec.extract:
+            return
+        extract_to = Path(spec.extract_to or destination / archive_path.stem)
         print(f"Extracting {spec.filename} ...")
-        extraction_path = destination / archive_path.stem
-        _extract_zip_safely(archive_path, extraction_path)
-        print(f"Done.")
+        _extract_zip_safely(archive_path, extract_to)
+        print("Done.")
 
 
 # ──────────────────────────────────────────────────────
-# 1.1 Subsection: Helper Functions
+# 2.1 Subsection: Helper Functions
 # ──────────────────────────────────────────────────────
-def _resolve_file(spec: EPN612Specs) -> dict:
+def _resolve_file(spec: ZenodoSpecs) -> dict:
     metadata = _get_metadata(spec.record_id)
     return _find_file(metadata, spec.filename)
 
@@ -85,16 +88,14 @@ def _get_metadata(record_id: int) -> dict:
 
 
 def _find_file(metadata: dict, filename: str) -> dict:
-    for remote_file in metadata.get("files", []):
+    files = metadata.get("files", [])
+    for remote_file in files:
         if remote_file.get("key") == filename:
             return remote_file
 
-    available_files = [
-        remote_file.get("key") for remote_file in metadata.get("files", [])
-    ]
     raise ValueError(
         f"File {filename!r} was not found in the Zenodo record. "
-        f"Available files: {available_files}"
+        f"Available files: {[remote_file.get('key') for remote_file in files]}"
     )
 
 
@@ -114,10 +115,7 @@ def _md5_checksum(checksum: str) -> str:
 
 
 def _stream_download(
-    url: str,
-    destination: Path,
-    expected_size: int,
-    description: str,
+    url: str, destination: Path, expected_size: int, description: str
 ) -> str:
     digest = hashlib.md5()
 
@@ -125,7 +123,7 @@ def _stream_download(
         response.raise_for_status()
 
         with (
-            destination.open("wb") as output,
+            destination.open("wb") as file,
             tqdm(
                 total=expected_size,
                 desc=description,
@@ -135,12 +133,10 @@ def _stream_download(
             ) as progress,
         ):
             for chunk in response.iter_content(chunk_size=CHUNK_SIZE):
-                if not chunk:
-                    continue
-
-                output.write(chunk)
-                digest.update(chunk)
-                progress.update(len(chunk))
+                if chunk:
+                    file.write(chunk)
+                    digest.update(chunk)
+                    progress.update(len(chunk))
 
     return digest.hexdigest()
 
@@ -164,15 +160,14 @@ def _extract_zip_safely(archive_path: Path, destination: Path) -> None:
     extraction_root = destination.resolve()
 
     with zipfile.ZipFile(archive_path) as archive:
-        # testzip() could be removed for performance purpose: 
-        # probably redundant integrity test, and doubles unzipping time (but negligeable compared to download time).
-        corrupt_member = archive.testzip() # check CRC checksum (zip)
+        corrupt_member = archive.testzip()  # check CRC checksum (zip)
         if corrupt_member is not None:
             raise ValueError(f"Corrupted ZIP member: {corrupt_member}")
 
         for member in archive.infolist():
             member_path = (extraction_root / member.filename).resolve()
-            if not member_path.is_relative_to(extraction_root): # check that every member's path is under the extraction root
+            # check that every member's path is under the extraction root
+            if not member_path.is_relative_to(extraction_root):
                 raise ValueError(f"Unsafe ZIP member path: {member.filename!r}")
 
         archive.extractall(extraction_root)

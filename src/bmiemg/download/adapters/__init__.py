@@ -1,4 +1,9 @@
-from .archive import ArchiveSpecs
-from .emg_epn_612 import EPN612Specs
+from .archive import ArchiveSpecs, ArchiveStrategy
+from .zenodo import ZenodoSpecs, ZenodoStrategy
 
-__all__ = ["ArchiveSpecs", "EPN612Specs"]
+__all__ = [
+    "ArchiveSpecs",
+    "ArchiveStrategy",
+    "ZenodoSpecs",
+    "ZenodoStrategy",
+]

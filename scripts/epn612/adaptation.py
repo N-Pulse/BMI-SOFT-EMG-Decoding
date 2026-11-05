@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, TypeAlias
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.signal import butter, resample_poly, sosfilt
+from scipy.signal import butter, iirnotch, lfilter, resample_poly, sosfilt
 
 if TYPE_CHECKING:
     from bmiemg.data.epn612.loader import EMGTrial
@@ -39,6 +39,9 @@ class BoardAdaptationConfig:
     highpass_hz: float = 20.0
     lowpass_hz: float = 500.0
     filter_order: int = 1
+    notch: bool = False
+    notch_hz: float = 50.0 
+    
 
     def __post_init__(self) -> None:
         if self.source_sampling_rate_hz <= 0 or self.target_sampling_rate_hz <= 0:
@@ -51,7 +54,10 @@ class BoardAdaptationConfig:
             raise ValueError("Low-pass cutoff must be below the target Nyquist rate")
         if self.filter_order <= 0:
             raise ValueError("Filter order must be positive")
-
+        if self.filter_order <= 0:
+            raise ValueError("Filter order must be positive")
+        if self.notch and not 0 < self.notch_hz < self.target_sampling_rate_hz / 2:          
+            raise ValueError("notch_hz must be between 0 and the target Nyquist rate")       
     @property
     def resampling_ratio(self) -> tuple[int, int]:
         """Return the integral polyphase up/down sampling factors."""
@@ -143,8 +149,12 @@ def mimic_board_analog_filter(
     )
     filtered = sosfilt(highpass, array, axis=-1)
     filtered = sosfilt(lowpass, filtered, axis=-1)
+    
+    if config.notch:                                                                  # optional: remove mains noise
+        b, a = iirnotch(config.notch_hz, Q=30.0, fs=config.target_sampling_rate_hz)   # narrow notch at notch_hz
+        filtered = lfilter(b, a, filtered, axis=-1)       
+        
     return np.asarray(filtered, dtype=np.float32)
-
 
 def quantize_signed_adc(signal: np.ndarray, resolution_bits: int) -> IntegerArray:
     """Quantize fractional full scale to centred signed ADC counts."""

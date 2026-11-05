@@ -231,3 +231,5 @@ docs/diagrams/*.png
 /artifacts/
 /playground/
 .claude/
+CLAUDE.md
+skills/

@@ -9,21 +9,14 @@ from ...domain import DownloadSpec
 
 
 # ================================================================
-# 1. Section: Functions
+# 1. Section: Class definition
 # ================================================================
 @dataclass
 class ArchiveSpecs(DownloadSpec):
     source: ClassVar[str] = "archive-raw"
 
-    url: str
-    username: str
-    password: str
-    dav_user: str
-    filename: str | None = None
-    extra: dict = field(default_factory=dict)
-
-    _base_url: str = "https://make-archives.epfl.ch"
-    _body: str = """<?xml version="1.0"?>
+    base_url: ClassVar[str] = "https://make-archives.epfl.ch"
+    body: ClassVar[str] = """<?xml version="1.0"?>
     <d:propfind xmlns:d="DAV:">
       <d:prop>
         <d:displayname />
@@ -33,20 +26,29 @@ class ArchiveSpecs(DownloadSpec):
       </d:prop>
     </d:propfind>
     """
-    _namespaces: dict = field(default_factory=lambda: {
-        "d": "DAV:",
-    })
+    namespaces: ClassVar[dict[str, str]] = {"d": "DAV:"}
 
-    def __post_init__(self):
-        self._dav_root = f"{self._base_url}/remote.php/dav/files/{self.dav_user}"
+    url: str
+    username: str
+    password: str
+    dav_user: str
+    filename: str | None = None
+    extra: dict = field(default_factory=dict)
+
+    dav_root: str = field(init=False)
+    dav_url: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.dav_root = f"{self.base_url}/remote.php/dav/files/{self.dav_user}"
 
         remote_path = self.url.strip("/")
         if remote_path:
-            self._dav_url = f"{self._dav_root}/{quote(remote_path)}"
+            self.dav_url = f"{self.dav_root}/{quote(remote_path)}"
         else:
-            self._dav_url = self._dav_root
+            self.dav_url = self.dav_root
 
-    def _header(self, depth: int | str = 1) -> dict:
+    def header(self, depth: int | str = 1) -> dict[str, str]:
+        """PROPFIND headers for the given depth."""
         return {
             "Depth": str(depth),
             "Content-Type": "application/xml",
