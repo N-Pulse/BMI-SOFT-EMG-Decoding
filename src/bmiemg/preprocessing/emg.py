@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import TypeAlias
 
@@ -63,6 +63,92 @@ class EMGProcessingConfig:
                 )
             if self.filter_order <= 0:
                 raise ValueError("Filter order must be positive")
+
+
+@dataclass(frozen=True, slots=True)
+class ChannelNormalizationStats:
+    """Training-derived mean and standard deviation for every EMG channel."""
+
+    mean: tuple[float, ...]
+    standard_deviation: tuple[float, ...]
+    epsilon: float = 1e-6
+
+    def __post_init__(self) -> None:
+        if not self.mean or len(self.mean) != len(self.standard_deviation):
+            raise ValueError("Mean and standard deviation must define every channel")
+        values = (*self.mean, *self.standard_deviation, self.epsilon)
+        if not np.isfinite(values).all():
+            raise ValueError("Normalization statistics must be finite")
+        if any(value < 0 for value in self.standard_deviation):
+            raise ValueError("Standard deviations cannot be negative")
+        if self.epsilon <= 0:
+            raise ValueError("Normalization epsilon must be positive")
+
+
+def fit_channel_normalization(
+    windows: Iterable[np.ndarray],
+    *,
+    epsilon: float = 1e-6,
+) -> ChannelNormalizationStats:
+    """Fit per-channel statistics using training windows only."""
+
+    channel_count: int | None = None
+    sample_count = 0
+    sums: np.ndarray | None = None
+    squared_sums: np.ndarray | None = None
+    for window in windows:
+        array = np.asarray(window, dtype=np.float64)
+        if array.ndim != 2 or array.shape[1] == 0:
+            raise ValueError(
+                f"Expected each window to have shape (channels, samples), got {array.shape}"
+            )
+        if channel_count is None:
+            channel_count = array.shape[0]
+            sums = np.zeros(channel_count, dtype=np.float64)
+            squared_sums = np.zeros(channel_count, dtype=np.float64)
+        elif array.shape[0] != channel_count:
+            raise ValueError("All windows must have the same channel count")
+        if not np.isfinite(array).all():
+            raise ValueError("EMG contains NaN or infinite values")
+        sums += array.sum(axis=1)
+        squared_sums += np.square(array).sum(axis=1)
+        sample_count += array.shape[1]
+
+    if channel_count is None or sums is None or squared_sums is None:
+        raise ValueError("Cannot fit normalization without training windows")
+    means = sums / sample_count
+    variances = np.maximum(squared_sums / sample_count - means**2, 0.0)
+    standard_deviations = np.sqrt(variances)
+    return ChannelNormalizationStats(
+        mean=tuple(float(value) for value in means),
+        standard_deviation=tuple(float(value) for value in standard_deviations),
+        epsilon=epsilon,
+    )
+
+
+def normalize_emg_channels(
+    windows: np.ndarray,
+    stats: ChannelNormalizationStats,
+) -> FloatArray:
+    """Apply saved per-channel training statistics to one window or a batch."""
+
+    array = np.asarray(windows, dtype=np.float32)
+    single_window = array.ndim == 2
+    if single_window:
+        array = array[np.newaxis, ...]
+    channel_count = len(stats.mean)
+    if array.ndim != 3 or array.shape[1] != channel_count or array.shape[2] == 0:
+        raise ValueError(
+            f"Expected (n_windows, {channel_count}, samples), got {array.shape}"
+        )
+    if not np.isfinite(array).all():
+        raise ValueError("EMG contains NaN or infinite values")
+    means = np.asarray(stats.mean, dtype=np.float32)[np.newaxis, :, np.newaxis]
+    scales = (np.asarray(stats.standard_deviation, dtype=np.float32) + stats.epsilon)[
+        np.newaxis, :, np.newaxis
+    ]
+    normalized = np.asarray((array - means) / scales, dtype=np.float32)
+    return normalized[0] if single_window else normalized
 
 
 def milliseconds_to_samples(milliseconds: float, sampling_rate_hz: float) -> int:
