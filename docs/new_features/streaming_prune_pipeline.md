@@ -8,123 +8,151 @@ Status: proposed. Nothing here is implemented yet.
 
 Three things stack up:
 
-1. `Loader.load` (`src/bmiemg/prune/adapters/loader.py`) returns a `list[DataActor]` holding every loaded actor at once.
-2. `DatasetPruner.apply` runs `actors = step.apply(actors)`. While a step runs, the input list and the output list are both alive, and most signal steps allocate new arrays, so the peak is about twice the dataset.
-3. On export, `DatasetPartition.mne_dataset` builds one `mne.io.RawArray` per trial and concatenates the whole partition. The test trials exist twice (`client.test` with hidden markers, `server.test` with real ones), and `_hide_markers` allocates a fresh zero array per trial.
+1. `Loader.load` (`src/bmiemg/prune/adapters/loader.py`) returns a `list[DataActor]` holding every `XdfData` at once.
+2. `DatasetPruner.apply` runs `actors = step.apply(actors)`. While a step runs, the input list and the output list are both alive. `signal_split`, `signal_unwarp`, `analogue_filter` and `marker_unification` all allocate new arrays, so the peak is about twice the dataset.
+3. On export, `DatasetPartition.mne_dataset` calls `np.vstack` and `mne.io.RawArray` for every trial and then `mne.concatenate_raws` over the whole partition. The test trials exist twice (`client.test` with hidden markers, `server.test` with real ones), and `_hide_markers` allocates a fresh zero array per trial.
 
 ## Goal
 
-Bound peak RAM to roughly "one file times the pipeline's working space, times the number of workers", with a configurable maximum number of parallel workers, while producing the same output as today: same trials, same split for the same seed, same files on disk.
+Bound peak RAM to roughly "one file times the pipeline's working space" (times the number of worker processes, if parallel), while producing exactly the same output as today: same trials, same split for the same seed, same files on disk.
 
 ## Why plain batching is not enough
 
-Running the full pipeline on chunks of N files would change the result: `TTVSplitStep` splits over all trials with one seeded RNG, so per-chunk splits differ from a single run.
+Running the full pipeline on chunks of N files would change the result. `TTVSplitStep` stratifies by subject and dominant movement and shuffles with one seeded RNG over all trials. Run per batch, every batch gets its own strata and its own shuffle, so the train/val/test membership differs from a single run.
 
-The way out is that only `ttv_split` needs the whole dataset, and it only needs metadata (subject, dominant movement), never the signal arrays.
+The way out is that only one step needs the whole dataset, and that step only needs metadata.
+
+## Step classification
+
+| Step | YAML key | What it needs | Kind |
+|---|---|---|---|
+| `RemoveSessionStep` | `remove_session` | the file name | per actor, filter (1 to 0 or 1) |
+| `SignalSplitStep` | `signal_split` | one `XdfData` | per actor |
+| `ProtocolDefinerStep` | `protocol_definer` | one actor's `date` | per actor |
+| `SignalUnwarpStep` | `signal_unwarp` | one `XdfData` | per actor |
+| `AnalogueFilterStep` | `analogue_filter` | one `TrialData` | per actor |
+| `MarkerUnificationStep` | `marker_unification` | one `TrialData` | per actor |
+| `BuildEpochs` | `build_epochs` | one `TrialData` (on a `Dataset` it just loops over the trials) | per actor, 1 to N |
+| `TTVSplitStep` | `ttv_split` | every trial's `subject_number` and dominant movement | global (barrier) |
+
+The barrier never reads the signal arrays. That is what makes streaming safe.
 
 ## Design
 
-```
-files ─► ProcessPoolExecutor(max_workers=N)
-           each worker: load_actors → actor steps → write trials to disk → return metadata
-      ─► global step (ttv_split) on metadata only → partition assignment
-      ─► writer: reads trials by assignment, writes client/server sets
-```
-
-### Actor vs global steps
-
-`PruneStep` gets one ClassVar:
-
-```python
-scope: ClassVar[Literal["actor", "global"]] = "actor"
-```
-
-Only `TTVSplitStep` sets `"global"`. No existing step changes. `DatasetPruner` splits the protocol at its global steps into segments: the actor steps of a segment run per file in the workers, a global step runs once after all workers are done (collecting `executor.map` results is the barrier). See "Several global steps" for how segments chain.
-
-An explicit flag rather than "the last step is global" keeps the rule visible and allows global steps in the middle of a protocol (e.g. normalisation with train-set statistics).
-
-### Phase 1: per-file workers
-
-1. `Loader` gets `iter_files(source_names)` yielding paths in today's order (sources, then suffix groups, then `rglob` order). `load()` stays for the in-memory path and the tests.
-2. Each worker loads one file (`load_actors`), runs the actor steps with `step.apply(actors)` on that file's actors, writes every resulting `TrialData` to a run cache folder (`np.save` of `signal_ch` and `markers`, dtype kept so output is bit-identical), and returns one metadata record per trial: subject, dominant movement, cache path, plus the fields the writer needs (channel names, sfreq, file name).
-3. Fan-out is free: a file that becomes N trials returns N records; a filtered file (`remove_session`) returns none.
-4. Workers return records, never arrays. Each worker handles exactly one file at a time, with every actor that file yields. `max_workers` is a `DatasetPruner` parameter and the only concurrency knob: files in memory at once = `max_workers`. Size it as `ram_budget / peak_per_file` rounded down, where `peak_per_file` is the peak RAM one worker uses on the largest file (its actors plus the copies the steps make). Example: 16 GB budget, 3 GB peak → 5 workers.
-
-The steps never deal with metadata bookkeeping: the record is derived once from the final `TrialData` of the chain.
-
-If a protocol has no global step, workers write their trials straight to the output and there is no cache.
-
-### Phase 2: the global step
-
-`TTVSplitStep` runs on the metadata records. Its logic already only reads the subject and the dominant movement, so `_strata`, `_split_groups` and `_split_stratum` stay; the records only need to expose those two values (store the dominant movement at record time).
-
-- `group_by: subject` sorts subject keys, so worker order does not matter. The stratified mode shuffles in list order, so records must come back in file order (`executor.map` preserves it).
-- `_hide_markers` moves out of the step: the split returns assignments, and the writer zeroes markers for `client.test` while writing.
-
-### Several global steps
-
-A global step is not a plain `apply` over everything. It has three parts:
-
-1. `summarise(actor) -> summary`, in the worker, per actor: a small record returned with the metadata.
-2. `reduce(summaries) -> params`, once, after the barrier.
-3. `apply_params(actor, params) -> actor`, per actor, at the start of the next segment's workers.
-
-`ttv_split` fits it: summarise = subject and dominant movement, reduce = partition assignment, apply = tag each trial with its partition (the writer reads the tag). A dataset-wide normalisation: summarise = per-channel sum, sum of squares and count, reduce = mean and std, apply = normalise the trial.
-
-A protocol with k global steps runs k + 1 segments:
+The pipeline becomes three phases.
 
 ```
-segment 1: workers read source files → actor steps → summarise → write cache → return records
-global 1:  reduce
-segment 2: workers read cache → apply global 1 → actor steps → summarise → write cache → return records
-...
-last:      writer reads cache → output files
+files ──► [per-actor steps] ──► spill to disk ──► handles ──► [global step] ──► [per-actor steps] ──► streamed writer
+          one file at a time                     metadata only                   one trial at a time
 ```
 
-Constraints:
+### Phase 1: stream and spill
 
-- Each global step costs one extra read and write of the cache.
-- Statistics computed before `ttv_split` include the test set (leakage). A step that should use train-set statistics only must come after the split; its summarise reads the partition tag and skips non-train trials.
-- Summaries must combine exactly from per-actor parts (sums, counts, min/max, sets). Medians or percentiles would need histograms or another pass.
+1. `Loader` gets an `iter_load(source_names) -> Iterator[DataActor]` that yields one actor per file. Keep `load()` as `list(self.iter_load(...))` so existing callers and tests keep working. File discovery (`rglob`, the readable summary) stays as is. Only the `load_file` calls become lazy.
+2. `DatasetPruner` splits the protocol's steps at the first global step: `head` (per-actor), `barrier`, `tail` (whatever follows).
+3. For each yielded actor, run the `head` steps on a one-element list (or via `apply_one`, see below). A step may return zero actors (`remove_session`) or several (`build_epochs`).
+4. Each resulting `TrialData` is spilled: `signal_ch` and `markers` are saved with `np.save` into a cache folder, for example `out_dir(protocol_name) / ".cache" / f"{run_timestamp}"`. The in-memory object is then replaced by a copy whose arrays come from `np.load(path, mmap_mode="r")`.
+5. Store the dominant movement in the handle at spill time, so the barrier never touches the arrays. Either add an optional field to `TrialData` or keep a side dict keyed by the cache path.
 
-Scope of the first implementation: the segment loop is written for any number of global steps, but only `ttv_split` exists, so in practice there is one barrier and it is the last step.
+A memory-mapped `TrialData` is the handle. `copy_with`, slicing in `BuildEpochs._segment_trial`, and `np.asarray` all work on `np.memmap`, so most code doesn't need to know it is lazy.
 
-### Phase 3: export
+If there is no global step in the protocol, skip the spill and write each actor directly. That case is pure streaming.
 
-`DatasetWriter` reads each partition's trials from the cache by assignment and must stop building one big `Raw` in memory: write each trial to a temporary `*_raw.fif`, open them with `mne.io.read_raw_fif(path, preload=False)`, `mne.concatenate_raws` and `.save()`. MNE then streams the data in chunks. Same files on disk as today.
+### Phase 2: the barrier
 
-The cache folder is removed in a `finally` block (or kept behind a `keep_cache` flag for debugging).
+Run `TTVSplitStep.apply` on the full list of handles. Its logic doesn't change: `_strata`, `_stratum_key` and `_split_stratum` only touch metadata and list positions, and the seeded RNG sees the same list in the same order, so the split is identical.
+
+Two details:
+
+- Ordering. The list order must match today's loader order (sources in order, then suffix groups, then `rglob` order) or the shuffle changes. If Phase 1 runs in parallel, sort results back into input order before the barrier.
+- `_hide_markers`. `np.zeros_like` on a memmap allocates a full array per test trial. Replace the eager copy with a lazy flag, for example a `hide_markers: bool = False` field on `DatasetPartition` that the writer applies per trial while writing. `server.test` and `client.test` then share the same handles.
+
+### Phase 3: tail steps and export
+
+Steps after the barrier (for example `build_epochs` on a `Dataset`) are per-actor in practice, so apply them per trial at write time rather than to the whole `Dataset` up front. The simplest form: the writer iterates a partition's handles, runs the tail steps on each trial, and writes the result.
+
+The writer must stop building one big `Raw`. There are two options:
+
+- Same output as today (one FIF per partition). Write each trial to a temporary `*_raw.fif` with `RawArray(...).save()`, then open them all with `mne.io.read_raw_fif(path, preload=False)`, `mne.concatenate_raws` the lazy raws, and `.save()` the result. MNE reads and writes non-preloaded data in buffer-sized chunks, so the partition is never fully in RAM. Delete the temporaries afterwards.
+- Simpler output (one FIF per trial, or per subject) inside the existing zip. It's cheaper, but downstream readers must accept a folder of files instead of one.
+
+Prefer the first option unless the consumers are already being changed.
+
+Finally, remove the cache folder in a `finally` block so a crash doesn't leave gigabytes behind (or keep it behind a `keep_cache` flag for debugging).
 
 ## Interface changes
 
-- `PruneStep`: `scope` ClassVar, default `"actor"`; `TTVSplitStep.scope = "global"`. Global steps implement `summarise`, `reduce` and `apply_params`.
-- `Loader`: `iter_files`.
-- `DatasetPruner`: `max_workers` parameter; a streaming `run_and_export(protocol_name)` (a streaming run cannot return every actor); helpers to split steps at the global one and to run one file. One run timestamp shared by the cache and the writers.
-- `TTVSplitStep`: accepts metadata records; no marker hiding.
-- `DatasetWriter`: per-trial writes, lazy concatenation, marker hiding for `client.test`.
-- `class.puml`: `scope` on `PruneStep`, `iter_files` on `Loader`, the new `DatasetPruner` members.
+### `PruneStep`
+
+```python
+@dataclass
+class PruneStep[InT: DataActor, OutT: DataActor](ABC):
+    name: ClassVar[str]
+    scope: ClassVar[Literal["actor", "global"]] = "actor"
+
+    def apply_one(self, actor: InT) -> list[OutT]:
+        return self.apply([actor])
+
+    @abstractmethod
+    def apply(self, actors: list[InT]) -> list[OutT]: ...
+```
+
+- Default `scope` is `"actor"`. Only `TTVSplitStep` sets `scope = "global"`.
+- `apply_one` defaults to calling `apply` with one element, so no existing step has to change to work. Steps can override it later for clarity.
+- `apply(list)` stays, so `custom_steps` and the current tests keep working.
+- A step that is wrongly marked `"actor"` but really needs the whole list will silently give a different result. Add a test per step (see Testing) rather than trusting the flag.
+
+### `DatasetPruner`
+
+- `run` keeps its signature for the in-memory path. Add a streaming path, for example `run_and_export(protocol_name)`, since a streaming run can't return every actor in RAM anyway.
+- New private helpers: `_split_steps(steps) -> (head, barrier, tail)`, `_stream_head(...) -> list[TrialData]` (handles), `_spill(trial) -> TrialData`.
+- One run timestamp shared by the cache folder and the writers (today it is created in `export`).
+
+### `Loader`
+
+- Add `iter_load`; `load` wraps it.
+
+### Exporter and writers
+
+- `Exporter.export` should accept an iterable, not only a list, and must not materialise it. Today it filters `actors` per writer, which consumes an iterator on the first writer. Either group by `actor.name` in one pass or require that there is one `Dataset` actor (true today).
+- `DatasetWriter._write_partition` writes per trial and concatenates lazily, as described above.
+- `DatasetPartition.mne_dataset` can stay for small in-memory use, but the writer should not call it.
+
+### Class diagram
+
+Update `docs/diagrams/class.puml`: add `scope` and `apply_one` on `PruneStep`, `iter_load` on `Loader`, the new `DatasetPruner` methods, and `hide_markers` on `DatasetPartition`.
+
+## Using the available RAM
+
+Phase 1 is embarrassingly parallel across files. Run it with `concurrent.futures.ProcessPoolExecutor`, with `max_workers = floor(ram_budget / peak_per_file)`. Measure `peak_per_file` on the largest `.xdf` (for example with `tracemalloc` or `/usr/bin/time -l`) and leave some headroom. Expose the budget or the worker count as a parameter instead of hardcoding it.
+
+Points to watch:
+
+- Workers must return handles (paths and metadata), never arrays, or the pickling cost and memory come back.
+- Steps and loaders must be picklable. They are plain dataclasses today, which is fine.
+- Preserve input order (`executor.map` does this) because the barrier depends on it.
 
 ## Known risks
 
-- A step marked `"actor"` that secretly needs the whole list gives a different result silently. Covered by the scope test below.
-- `ProtocolDefinerStep` mutates actors in place. Harmless per worker, but it should use `copy_with`.
-- Steps and loaders must be picklable for the workers; they are plain dataclasses today.
-- Disk space: the cache needs roughly the size of the processed signals.
+- Step order in the protocol matters. If `build_epochs` runs before `ttv_split`, each epoch becomes its own unit in the split. The design handles that (more handles, still small), but it is a different split from splitting whole trials. Check which one the protocol intends.
+- `ProtocolDefinerStep` mutates actors in place. It works with streaming, but it should use `copy_with` like the other steps.
+- Memory-mapped arrays are read-only. Any step that writes into an input array in place will fail with an error, which is the desired outcome, but check the head steps that run after spilling (none today, since the spill happens after the head).
+- Disk space. The cache needs roughly the size of the processed signals. Check free space up front or document it.
+- Float precision. `np.save` keeps dtype exactly, so the output is bit-identical. Don't convert dtypes when spilling.
 
 ## Testing
 
-1. Equivalence: on a small fixture dataset, the in-memory path and the streaming path with the same protocol and seed export identical FIF data, channel names, sfreq and partition membership. Main acceptance test.
-2. Scope: for every `"actor"` step, `step.apply(xs) == [y for x in xs for y in step.apply([x])]` on a few actors.
-3. Segments: a protocol with a fake global step in the middle (e.g. a counting step) gives the same result streamed as in memory, and its summaries reach `reduce` from every actor.
-4. Ordering: with several workers, records reach the global step in file order.
-5. Cleanup: the cache folder is gone after a successful run and after one that raises.
-6. Memory: peak RSS on synthetic large files stays under a bound. Marked slow, never run on a full dataset locally.
+1. Equivalence. On a small fixture dataset, run the old in-memory path and the new streaming path with the same protocol and seed, and compare the exported FIF data (`get_data()`), channel names, sfreq and partition membership. This is the main acceptance test.
+2. Per-step scope check. For every step marked `"actor"`, assert `step.apply(xs) == [y for x in xs for y in step.apply_one(x)]` on a few actors. This catches a step that secretly needs the whole list.
+3. Memory. A test or script that runs the pipeline on synthetic large files and asserts peak RSS stays under a bound (`resource.getrusage` or `tracemalloc`). Mark it slow.
+4. Cleanup. The cache folder is gone after both a successful run and a run that raises.
+5. Ordering. With parallel workers, the barrier receives handles in input order.
 
 ## Suggested order of work
 
-1. Add `scope` to `PruneStep`, mark `TTVSplitStep` global and split it into `summarise`/`reduce`/`apply_params`, add the scope test.
-2. Add `Loader.iter_files` and the per-file worker with the cache, sequential first.
-3. Make `TTVSplitStep` work on metadata records and move marker hiding to the writer.
-4. Rewrite `DatasetWriter` to write per trial and concatenate lazily; pass the equivalence test.
-5. Add `ProcessPoolExecutor` with `max_workers`.
-6. Update `class.puml`, the prune README and the prune scripts.
+1. Add `scope` and `apply_one` to `PruneStep`, mark `TTVSplitStep` as global, and add the per-step scope test.
+2. Add `Loader.iter_load`.
+3. Add the streaming path in `DatasetPruner` (head, spill, barrier) without changing export, and pass the equivalence test on `run` output.
+4. Make `hide_markers` lazy and rewrite `DatasetWriter` to write per trial and concatenate lazily. Pass the equivalence test on exported files.
+5. Add parallel Phase 1 with a RAM budget parameter.
+6. Update `class.puml` and `scripts/01_prune_dataset/prune_archive_raw.py`.
